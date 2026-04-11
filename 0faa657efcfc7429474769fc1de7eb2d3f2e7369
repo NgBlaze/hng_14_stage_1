@@ -1,0 +1,21 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "0faa657efcfc7429474769fc1de7eb2d3f2e7369",
+  "prompts": {
+    "c3745bee8f07dfb7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ed2da56b-553d-4d62-8f50-9d6b877b94d0",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 73,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  }
+}
