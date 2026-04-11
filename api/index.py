@@ -14,12 +14,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+CORS_HEADERS = {"Access-Control-Allow-Origin": "*"}
+
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(
         status_code=422,
         content={"status": "error", "message": "Invalid input: name must be a string"},
+        headers=CORS_HEADERS,
     )
 
 
@@ -29,6 +32,7 @@ async def classify_name(name: str = Query(default=None)):
         return JSONResponse(
             status_code=400,
             content={"status": "error", "message": "Missing or empty name parameter"},
+            headers=CORS_HEADERS,
         )
 
     try:
@@ -45,16 +49,19 @@ async def classify_name(name: str = Query(default=None)):
                 "status": "error",
                 "message": f"Upstream API error: {e.response.status_code}",
             },
+            headers=CORS_HEADERS,
         )
     except httpx.RequestError:
         return JSONResponse(
             status_code=502,
             content={"status": "error", "message": "Failed to reach upstream API"},
+            headers=CORS_HEADERS,
         )
     except Exception:
         return JSONResponse(
             status_code=500,
             content={"status": "error", "message": "Internal server error"},
+            headers=CORS_HEADERS,
         )
 
     gender = data.get("gender")
@@ -67,10 +74,11 @@ async def classify_name(name: str = Query(default=None)):
                 "status": "error",
                 "message": "No prediction available for the provided name",
             },
+            headers=CORS_HEADERS,
         )
 
     probability = data.get("probability", 0.0)
-    is_confident = probability >= 0.7 and sample_size >= 100
+    is_confident = bool(probability >= 0.7 and sample_size >= 100)
     processed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     return JSONResponse(
@@ -86,4 +94,5 @@ async def classify_name(name: str = Query(default=None)):
                 "processed_at": processed_at,
             },
         },
+        headers=CORS_HEADERS,
     )
