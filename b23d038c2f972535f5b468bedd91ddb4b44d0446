@@ -1,0 +1,25 @@
+vercel.json
+  c3745bee8f07dfb7 2-11
+api/index.py
+  c3745bee8f07dfb7 17,25,35,52,58,64,77,81,97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "b23d038c2f972535f5b468bedd91ddb4b44d0446",
+  "prompts": {
+    "c3745bee8f07dfb7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ed2da56b-553d-4d62-8f50-9d6b877b94d0",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 93,
+      "total_deletions": 1,
+      "accepted_lines": 93,
+      "overriden_lines": 0
+    }
+  }
+}
