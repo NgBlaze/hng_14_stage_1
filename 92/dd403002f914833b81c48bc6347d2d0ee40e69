@@ -1,0 +1,54 @@
+.gitignore
+  h_17988937eb84f9 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "92dd403002f914833b81c48bc6347d2d0ee40e69",
+  "prompts": {
+    "0d3cdf64f0ec4925": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1c5448ab-e476-4a0a-854b-88a540b82f59",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 838,
+      "total_deletions": 142,
+      "accepted_lines": 445,
+      "overriden_lines": 2
+    },
+    "1fa370e018bb7a76": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "e74b628c-ef4d-4c7a-958b-bfa7c24ed7d8",
+        "model": "copilot/claude-opus-4.6"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 618378,
+      "total_deletions": 0,
+      "accepted_lines": 618378,
+      "overriden_lines": 0
+    },
+    "2e435b0ab832d52e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b745e381-543d-4675-a24a-9472f6e2478a",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  },
+  "humans": {
+    "h_17988937eb84f9": {
+      "author": "Precious Okolaa"
+    }
+  }
+}
