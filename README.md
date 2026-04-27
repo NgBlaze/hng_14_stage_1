@@ -1,251 +1,308 @@
-# Insighta Labs — Intelligence Query Engine
+# Insighta Labs+ — Backend API
 
-A FastAPI service that stores demographic profiles and exposes a queryable API with advanced filtering, sorting, pagination, and natural language search.
+Secure, role-based profile intelligence API built with FastAPI, PostgreSQL (Neon), and deployed on Vercel.
 
-## Endpoints
+**Live API:** https://hng-14-stage-1.vercel.app  
+**Docs (Swagger):** https://hng-14-stage-1.vercel.app/docs
 
-### `POST /api/profiles`
-Create a profile from a name via Genderize / Agify / Nationalize. Idempotent — returns existing profile if name already exists.
+---
 
-**Request:**
-```json
-{ "name": "ella" }
+## System Architecture
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                        Clients                           │
+│   CLI (insighta)      Web Portal       Direct API        │
+└──────────┬───────────────┬────────────────┬─────────────┘
+           │               │                │
+           │  Bearer JWT   │  HTTP-only     │  Bearer JWT
+           │               │  cookies       │
+           ▼               ▼                ▼
+┌──────────────────────────────────────────────────────────┐
+│             FastAPI  (Vercel Serverless)                  │
+│                                                          │
+│  ┌──────────────┐  ┌───────────────┐  ┌──────────────┐  │
+│  │  /auth/*     │  │ /api/profiles │  │  Middleware  │  │
+│  │  OAuth + JWT │  │  CRUD + NLP   │  │  CORS, Rate  │  │
+│  └──────────────┘  └───────────────┘  │  Limit, Log  │  │
+│                                       └──────────────┘  │
+└───────────────────────────┬──────────────────────────────┘
+                            │
+           ┌────────────────┴──────────────────┐
+           ▼                                   ▼
+┌─────────────────────┐            ┌────────────────────────┐
+│   Neon PostgreSQL   │            │    External APIs        │
+│   - profiles        │            │    - genderize.io       │
+│   - users           │            │    - agify.io           │
+│   - refresh_tokens  │            │    - nationalize.io     │
+│   - oauth_states    │            └────────────────────────┘
+└─────────────────────┘
 ```
 
-**Response (201):**
-```json
-{
-  "status": "success",
-  "data": {
-    "id": "019534a1-3b2c-7f4d-a1b2-c3d4e5f67890",
-    "name": "ella",
-    "gender": "female",
-    "gender_probability": 0.99,
-    "age": 46,
-    "age_group": "adult",
-    "country_id": "NG",
-    "country_name": "Nigeria",
-    "country_probability": 0.85,
-    "created_at": "2026-04-01T12:00:00Z"
-  }
-}
+### Module Layout
+
+```
+api/
+├── index.py          # FastAPI app, CORS, middleware, exception handlers
+├── auth.py           # JWT helpers, PKCE verify, get_current_user, check_api_version
+├── limiter.py        # Slowapi rate limiter keyed by user ID or IP
+├── models.py         # SQLAlchemy models: Profile, User, RefreshToken, OAuthState
+├── database.py       # Engine, SessionLocal, init_db (auto-migrations)
+├── services.py       # Business logic: create / list / search / delete profiles
+├── nlp.py            # Natural language query parser
+├── utils.py          # UUID v7 generator, age classifier, country lookup table
+└── routes/
+    ├── auth.py       # All /auth/* endpoints
+    └── profiles.py   # All /api/profiles/* endpoints
 ```
 
 ---
 
-### `GET /api/profiles`
-List profiles with optional filtering, sorting, and pagination.
+## Authentication Flow
 
-**Filter params:**
+### Web Portal (Browser OAuth)
 
-| Param | Type | Description |
-|---|---|---|
-| `gender` | string | `male` or `female` |
-| `age_group` | string | `child`, `teenager`, `adult`, `senior` |
-| `country_id` | string | ISO-2 code e.g. `NG` |
-| `min_age` | int | minimum age (inclusive) |
-| `max_age` | int | maximum age (inclusive) |
-| `min_gender_probability` | float | 0.0–1.0 |
-| `min_country_probability` | float | 0.0–1.0 |
+```
+Browser                    Backend                    GitHub
+   │                          │                          │
+   │── GET /auth/github ──────►│                          │
+   │◄── 302 → GitHub ─────────│                          │
+   │                          │                          │
+   │── authenticates ─────────────────────────────────►│
+   │◄── redirect /auth/github/callback?code= ───────────│
+   │                          │                          │
+   │                          │── POST access_token ────►│
+   │                          │◄── gh_token ─────────────│
+   │                          │── GET /user, /emails ───►│
+   │                          │◄── user info ────────────│
+   │                          │                          │
+   │                          │  upsert user in DB       │
+   │                          │  issue JWT pair          │
+   │◄── 302 → /dashboard ─────│                          │
+   │    Set-Cookie: access_token  (HttpOnly; Secure)     │
+   │    Set-Cookie: refresh_token (HttpOnly; Secure)     │
+   │    Set-Cookie: csrf_token    (Secure; JS-readable)  │
+```
 
-**Sorting:**
+### CLI (PKCE Flow)
 
-| Param | Values |
+```
+CLI                         Backend                    GitHub
+ │                             │                          │
+ │  code_verifier = base64url(random_bytes(32))           │
+ │  code_challenge = base64url(SHA-256(code_verifier))    │
+ │                             │                          │
+ │  start local HTTP server (random port)                 │
+ │  open browser → GitHub OAuth URL                       │
+ │◄── GET /callback?code=... (local server captures it)   │
+ │                             │                          │
+ │── POST /auth/github/exchange ──────────────────────►  │
+ │   { code, code_verifier,    │                          │
+ │     code_challenge,         │                          │
+ │     redirect_uri }          │                          │
+ │                             │  verify PKCE challenge   │
+ │                             │  exchange code → gh token│
+ │                             │  upsert user             │
+ │                             │  issue JWT pair          │
+ │◄── { access_token,          │                          │
+ │      refresh_token, user }  │                          │
+ │                             │                          │
+ │  save to ~/.insighta/credentials.json (chmod 600)      │
+```
+
+### PKCE Verification
+
+```python
+# CLI generates
+code_verifier  = base64url(os.urandom(32))
+code_challenge = base64url(hashlib.sha256(code_verifier).digest())
+
+# Backend verifies
+expected = base64url(hashlib.sha256(code_verifier).digest())
+assert expected == code_challenge   # if mismatch → 400
+```
+
+---
+
+## Token Handling
+
+| Token | Expiry | Web storage | CLI storage | Transport |
+|---|---|---|---|---|
+| Access | 3 min | `HttpOnly` cookie | `~/.insighta/credentials.json` | `Authorization: Bearer` or cookie |
+| Refresh | 5 min | `HttpOnly` cookie | `~/.insighta/credentials.json` | Request body or cookie |
+
+**Rotation:** every `/auth/refresh` call revokes the presented token instantly and issues a new pair. Raw tokens are never stored — only SHA-256 hashes are persisted in the `refresh_tokens` table.
+
+**Refresh flow:**
+1. Client makes a request → `401 Unauthorized`
+2. Client sends refresh token to `POST /auth/refresh`
+3. Backend verifies hash, checks expiry, marks token revoked
+4. Backend issues new access + refresh pair
+5. Client retries original request with new access token
+6. If refresh also fails → user must log in again
+
+---
+
+## Role Enforcement
+
+| Role | Permissions |
 |---|---|
-| `sort_by` | `age`, `created_at`, `gender_probability` |
-| `order` | `asc` (default), `desc` |
+| `admin` | Read, create, delete profiles |
+| `analyst` | Read and search only |
 
-**Pagination:**
+Admin usernames are configured via `ADMIN_GITHUB_USERNAMES` (comma-separated). Role is assigned at first login and re-evaluated on every subsequent login.
 
-| Param | Default | Max |
-|---|---|---|
-| `page` | 1 | — |
-| `limit` | 10 | 50 |
+Enforcement uses FastAPI dependency injection — no scattered checks inside route handlers:
 
-**Example:**
+```python
+# Require any authenticated user
+user = Depends(get_current_user)
+
+# Require admin role
+user = Depends(require_admin)
 ```
-GET /api/profiles?gender=male&country_id=NG&min_age=25&sort_by=age&order=desc&page=1&limit=10
+
+`is_active = False` on a user → `403 Forbidden` on all requests regardless of role.
+
+---
+
+## API Versioning
+
+All `/api/profiles/*` endpoints require the header:
+
+```
+X-API-Version: 1
 ```
 
-**Response (200):**
+Missing or incorrect value → `400 Bad Request`. Browser-navigable endpoints (CSV export) additionally accept `?api_version=1` as a query parameter fallback since browsers cannot set custom headers on direct URL navigation.
+
+---
+
+## Natural Language Search
+
+`GET /api/profiles/search?q=<query>`
+
+Regex-based parser in `api/nlp.py` — no external ML dependencies.
+
+**Supported patterns:**
+
+| Query fragment | Extracted filter |
+|---|---|
+| `male`, `men`, `boys` | `gender=male` |
+| `female`, `women`, `girls` | `gender=female` |
+| `children`, `kids` | `age_group=child` |
+| `teenagers`, `teens` | `age_group=teenager` |
+| `adults` | `age_group=adult` |
+| `seniors`, `elderly` | `age_group=senior` |
+| `young` | `min_age=16, max_age=24` |
+| `above 30`, `over 30`, `older than 30` | `min_age=30` |
+| `below 50`, `under 50` | `max_age=50` |
+| `between 20 and 40` | `min_age=20, max_age=40` |
+| `from Nigeria`, `in Germany` | `country_id=NG / DE` |
+
+Country names and demonyms (e.g. "Nigerian", "British") are resolved to ISO 3166-1 alpha-2 codes via a static lookup table covering 90+ countries.
+
+**Examples:**
+```
+"young males from Nigeria"     → gender=male, min_age=16, max_age=24, country_id=NG
+"adult women in Germany"       → gender=female, age_group=adult, country_id=DE
+"seniors above 60"             → age_group=senior, min_age=60
+"teenagers between 13 and 17" → age_group=teenager, min_age=13, max_age=17
+```
+
+---
+
+## Rate Limiting
+
+| Scope | Limit |
+|---|---|
+| `/auth/*` endpoints | 10 requests / minute |
+| All other endpoints | 60 requests / minute per user |
+
+Authenticated requests are keyed by user ID extracted from the JWT; unauthenticated requests fall back to client IP. Exceeded limits return `429 Too Many Requests`.
+
+---
+
+## Endpoints Reference
+
+### Auth
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/auth/github` | — | Initiate GitHub OAuth (web portal) |
+| `GET` | `/auth/github/callback` | — | OAuth callback handler |
+| `POST` | `/auth/github/exchange` | — | CLI PKCE code exchange |
+| `POST` | `/auth/refresh` | — | Rotate access + refresh token pair |
+| `POST` | `/auth/logout` | — | Revoke refresh token |
+| `GET` | `/auth/whoami` | Required | Return current user details |
+
+### Profiles
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| `GET` | `/api/profiles` | Any | List with filters, sorting, pagination |
+| `GET` | `/api/profiles/search` | Any | Natural language search |
+| `GET` | `/api/profiles/export` | Any | Download CSV with same filters |
+| `GET` | `/api/profiles/{id}` | Any | Fetch a single profile |
+| `POST` | `/api/profiles` | Admin | Create profile from external APIs |
+| `DELETE` | `/api/profiles/{id}` | Admin | Delete a profile |
+
+All profile endpoints require `X-API-Version: 1`.
+
+---
+
+## Paginated Response Format
+
 ```json
 {
   "status": "success",
   "page": 1,
   "limit": 10,
-  "total": 2026,
-  "data": [
-    {
-      "id": "b3f9c1e2-7d4a-4c91-9c2a-1f0a8e5b6d12",
-      "name": "emmanuel okonkwo",
-      "gender": "male",
-      "gender_probability": 0.99,
-      "age": 34,
-      "age_group": "adult",
-      "country_id": "NG",
-      "country_name": "Nigeria",
-      "country_probability": 0.85,
-      "created_at": "2026-04-01T12:00:00Z"
-    }
-  ]
+  "total": 2034,
+  "total_pages": 204,
+  "links": {
+    "self": "/api/profiles?page=1&limit=10",
+    "next": "/api/profiles?page=2&limit=10",
+    "prev": null
+  },
+  "data": [ ... ]
 }
 ```
 
-All filters are combinable. Every condition must match.
-
 ---
 
-### `GET /api/profiles/search?q=<query>`
-Natural language query endpoint. Converts plain English into filters then runs the same query pipeline as `GET /api/profiles`.
+## Environment Variables
 
-Supports `page` and `limit` pagination params.
-
-**Examples:**
-```
-GET /api/profiles/search?q=young males from nigeria
-GET /api/profiles/search?q=females above 30
-GET /api/profiles/search?q=adult males from kenya
-GET /api/profiles/search?q=people from angola
-GET /api/profiles/search?q=male and female teenagers above 17
-```
-
----
-
-### `GET /api/profiles/{id}`
-Get a single profile by UUID v7.
-
-**Response (200):** Full profile object.
-
----
-
-### `DELETE /api/profiles/{id}`
-Delete a profile. Returns `204 No Content`.
-
----
-
-## Natural Language Parsing
-
-### How it works
-
-The parser (`parse_query`) lowercases the query then applies a series of regex rules in order. Each rule extracts one filter dimension; all extracted filters are combined (AND logic) before hitting the database.
-
-### Supported keywords and mappings
-
-**Gender:**
-| Keywords | Filter |
+| Variable | Description |
 |---|---|
-| male, males, man, men, boy, boys | `gender=male` |
-| female, females, woman, women, girl, girls, lady, ladies | `gender=female` |
-| both (e.g. "male and female") | no gender filter |
-
-**Age groups (stored values):**
-| Keywords | Filter |
-|---|---|
-| child, children, kid, kids | `age_group=child` |
-| teenager, teenagers, teen, teens, adolescent | `age_group=teenager` |
-| adult, adults | `age_group=adult` |
-| senior, seniors, elderly | `age_group=senior` |
-
-**Special age keyword:**
-| Keyword | Filter |
-|---|---|
-| young | `min_age=16` + `max_age=24` (parsing only — not a stored group) |
-
-**Age modifiers:**
-| Pattern | Filter |
-|---|---|
-| above N / over N / older than N / at least N | `min_age=N` |
-| below N / under N / younger than N / at most N | `max_age=N` |
-| between N and M | `min_age=N` + `max_age=M` |
-| ages N to M | `min_age=N` + `max_age=M` |
-
-**Country:**
-Recognized after `from` or `in`. Uses longest-match against a dictionary of ~100 country names and demonyms (e.g. "nigerian" → `NG`, "south africa" → `ZA`).
-
-| Pattern | Filter |
-|---|---|
-| from nigeria / nigerian | `country_id=NG` |
-| from kenya / kenyan | `country_id=KE` |
-| from angola | `country_id=AO` |
-| in south africa | `country_id=ZA` |
-| (see source for full list) | |
-
-**Rule: uninterpretable query** — if no filter is extracted, returns:
-```json
-{ "status": "error", "message": "Unable to interpret query" }
-```
-
-### Limitations
-
-- **No synonym expansion.** "guys" or "dudes" are not recognized as male.
-- **No relative age words beyond "young".** "middle-aged", "old", "teenage" are not mapped (use `age_group=adult` or explicit age ranges).
-- **Country detection is dictionary-based.** Misspellings, abbreviations outside the dictionary (e.g. "naija"), or uncommon country names will not be recognized.
-- **Single-country extraction.** Only one country per query is extracted; "from nigeria or kenya" will only match "nigeria".
-- **No negation.** "not from nigeria" is not supported.
-- **No OR logic.** Each extracted filter is applied with AND. "adults or seniors" returns neither.
-- **"Young" overrides explicit age group.** If "young" appears with a stored age group word (child/teen/adult/senior), the stored age group takes precedence.
-- **Ambiguous "in".** "in adults" might incorrectly trigger country detection if "adults" were a country name — it isn't, but novel queries with coincidental matches may behave unexpectedly.
-
----
-
-## Error Responses
-
-```json
-{ "status": "error", "message": "<description>" }
-```
-
-| Status | Reason |
-|---|---|
-| 400 | Missing or empty parameter |
-| 404 | Profile not found |
-| 422 | Invalid parameter type or value; unable to interpret NL query |
-| 500 | Internal server error |
-| 502 | External API (Genderize / Agify / Nationalize) returned an invalid response |
-
----
-
-## Classification Rules
-
-- **Age group**: `0–12` → child, `13–19` → teenager, `20–59` → adult, `60+` → senior
-- **Nationality**: country with highest probability from Nationalize API
-- **IDs**: UUID v7 (time-ordered)
-- **Timestamps**: UTC ISO 8601 (`YYYY-MM-DDTHH:MM:SSZ`)
-
----
-
-## Database Setup (Vercel + Neon)
-
-Vercel is serverless — SQLite doesn't persist between invocations. Use a hosted PostgreSQL database such as [Neon](https://neon.tech) (free tier).
-
-1. Create a Neon project and copy the connection string (`postgresql://...?sslmode=require`).
-2. In Vercel → **Settings → Environment Variables** → add `DATABASE_URL`.
-3. Deploy. The table and indexes are created automatically on cold start.
-
-### Seeding
-
-```bash
-pip install -r requirements.txt
-python3 seed.py
-```
-
-The seed script generates 2026 profiles and inserts them. Re-running is safe — existing names are skipped.
+| `DATABASE_URL` | PostgreSQL connection string |
+| `GITHUB_CLIENT_ID` | GitHub OAuth App client ID |
+| `GITHUB_CLIENT_SECRET` | GitHub OAuth App client secret |
+| `JWT_SECRET_KEY` | Secret for HS256 JWT signing |
+| `ADMIN_GITHUB_USERNAMES` | Comma-separated admin GitHub usernames |
+| `BACKEND_URL` | Public URL of this API |
+| `WEB_PORTAL_URL` | Public URL of the web portal |
 
 ---
 
 ## Local Development
 
 ```bash
+git clone https://github.com/NgBlaze/hng_14_stage_1.git
+cd hng_14_stage_1
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env   # fill in values
 uvicorn api.index:app --reload
+# → http://localhost:8000
 ```
 
-SQLite is used automatically at `/tmp/profiles.db` when `DATABASE_URL` is unset.
+---
+
+## Deployment
+
+Deployed on Vercel as a Python serverless function. All requests are rewritten to `api/index.py` via `vercel.json`.
 
 ```bash
-# Seed locally
-python3 seed.py
-
-# Query
-curl "http://localhost:8000/api/profiles?gender=male&country_id=NG&min_age=25&sort_by=age&order=desc"
-curl "http://localhost:8000/api/profiles/search?q=young+males+from+nigeria"
+vercel --prod
 ```
