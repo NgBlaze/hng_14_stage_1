@@ -17,10 +17,14 @@ from api.utils import generate_uuid7
 GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
 GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
 BACKEND_URL = os.environ.get("BACKEND_URL", "").rstrip("/")
-WEB_PORTAL_URL = os.environ.get("WEB_PORTAL_URL", "").rstrip("/")
 ADMIN_GITHUB_USERNAMES = {
     u.strip() for u in os.environ.get("ADMIN_GITHUB_USERNAMES", "").split(",") if u.strip()
 }
+
+
+def get_web_portal_url() -> str:
+    """Read at request time so Vercel env var changes take effect without redeployment."""
+    return os.environ.get("WEB_PORTAL_URL", "").rstrip("/")
 REFRESH_TOKEN_EXPIRE_MINUTES = 5
 
 router = APIRouter(prefix="/auth")
@@ -134,7 +138,7 @@ async def github_oauth_callback(
 ):
     """Handle GitHub OAuth redirect for web portal."""
     if error or not code or not state:
-        return RedirectResponse(url=f"{WEB_PORTAL_URL}/login?error=oauth_failed")
+        return RedirectResponse(url=f"{get_web_portal_url()}/login?error=oauth_failed")
 
     db = SessionLocal()
     try:
@@ -149,7 +153,7 @@ async def github_oauth_callback(
             .first()
         )
         if not oauth_state or oauth_state.expires_at.replace(tzinfo=timezone.utc) < now:
-            return RedirectResponse(url=f"{WEB_PORTAL_URL}/login?error=invalid_state")
+            return RedirectResponse(url=f"{get_web_portal_url()}/login?error=invalid_state")
 
         oauth_state.used = True
         db.commit()
@@ -168,7 +172,7 @@ async def github_oauth_callback(
             )
         gh_token = token_resp.json().get("access_token")
         if not gh_token:
-            return RedirectResponse(url=f"{WEB_PORTAL_URL}/login?error=token_exchange_failed")
+            return RedirectResponse(url=f"{get_web_portal_url()}/login?error=token_exchange_failed")
 
         # Fetch GitHub user info
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -191,7 +195,8 @@ async def github_oauth_callback(
         db.close()
 
     # Redirect to web portal if it's a separate deployment, otherwise show backend success page
-    portal = WEB_PORTAL_URL if (WEB_PORTAL_URL and WEB_PORTAL_URL != BACKEND_URL) else None
+    _web_portal = get_web_portal_url()
+    portal = _web_portal if (_web_portal and _web_portal != BACKEND_URL) else None
     redirect_url = f"{portal}/dashboard" if portal else f"{BACKEND_URL}/auth/success"
 
     response = RedirectResponse(url=redirect_url)
@@ -402,7 +407,8 @@ async def auth_success(request: Request):
         finally:
             db.close()
 
-    portal_url = WEB_PORTAL_URL if (WEB_PORTAL_URL and WEB_PORTAL_URL != BACKEND_URL) else None
+    _wp = get_web_portal_url()
+    portal_url = _wp if (_wp and _wp != BACKEND_URL) else None
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
