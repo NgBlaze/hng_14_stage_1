@@ -4,11 +4,11 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Query, Request, HTTPException
+from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
 from slowapi.util import get_remote_address
 
-from api.auth import create_access_token, create_refresh_token, hash_token, verify_pkce
+from api.auth import create_access_token, create_refresh_token, get_current_user, hash_token, verify_pkce
 from api.database import SessionLocal
 from api.limiter import limiter
 from api.models import OAuthState, RefreshToken, User
@@ -372,9 +372,7 @@ async def logout(request: Request):
 # ─── GET /auth/whoami ─────────────────────────────────────────────────────────
 
 @router.get("/whoami")
-async def whoami(request: Request):
-    from api.auth import get_current_user
-    user = await get_current_user(request)
+async def whoami(user=Depends(get_current_user)):
     return JSONResponse(content={
         "status": "success",
         "data": {
