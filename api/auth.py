@@ -100,8 +100,10 @@ def require_admin(user=Depends(get_current_user)):
     return user
 
 
-def check_api_version(x_api_version: Optional[str] = Header(default=None)):
-    if x_api_version != "1":
+def check_api_version(request: Request, x_api_version: Optional[str] = Header(default=None)):
+    # also accept ?api_version=1 for browser-navigable endpoints (e.g. CSV export)
+    effective = x_api_version or request.query_params.get("api_version")
+    if effective != "1":
         raise HTTPException(
             status_code=400,
             detail={"status": "error", "message": "API version header required"},
