@@ -131,7 +131,7 @@ async def github_oauth_callback(
             .filter(
                 OAuthState.state == state,
                 OAuthState.source == "web",
-                OAuthState.used == False,
+                OAuthState.used.is_(False),
             )
             .first()
         )
@@ -288,7 +288,7 @@ async def refresh_tokens(request: Request):
     try:
         rt = (
             db.query(RefreshToken)
-            .filter(RefreshToken.token_hash == token_hash, RefreshToken.is_revoked == False)
+            .filter(RefreshToken.token_hash == token_hash, RefreshToken.is_revoked.is_(False))
             .first()
         )
         if not rt:
