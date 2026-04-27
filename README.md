@@ -9,34 +9,37 @@ Secure, role-based profile intelligence API built with FastAPI, PostgreSQL (Neon
 
 ## System Architecture
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                        Clients                           │
-│   CLI (insighta)      Web Portal       Direct API        │
-└──────────┬───────────────┬────────────────┬─────────────┘
-           │               │                │
-           │  Bearer JWT   │  HTTP-only     │  Bearer JWT
-           │               │  cookies       │
-           ▼               ▼                ▼
-┌──────────────────────────────────────────────────────────┐
-│             FastAPI  (Vercel Serverless)                  │
-│                                                          │
-│  ┌──────────────┐  ┌───────────────┐  ┌──────────────┐  │
-│  │  /auth/*     │  │ /api/profiles │  │  Middleware  │  │
-│  │  OAuth + JWT │  │  CRUD + NLP   │  │  CORS, Rate  │  │
-│  └──────────────┘  └───────────────┘  │  Limit, Log  │  │
-│                                       └──────────────┘  │
-└───────────────────────────┬──────────────────────────────┘
-                            │
-           ┌────────────────┴──────────────────┐
-           ▼                                   ▼
-┌─────────────────────┐            ┌────────────────────────┐
-│   Neon PostgreSQL   │            │    External APIs        │
-│   - profiles        │            │    - genderize.io       │
-│   - users           │            │    - agify.io           │
-│   - refresh_tokens  │            │    - nationalize.io     │
-│   - oauth_states    │            └────────────────────────┘
-└─────────────────────┘
+```mermaid
+graph TD
+    CLI["CLI (insighta)\nBearer JWT"]
+    WEB["Web Portal\nHTTP-only cookies"]
+    API["Direct API\nBearer JWT"]
+
+    CLI --> FASTAPI
+    WEB --> FASTAPI
+    API --> FASTAPI
+
+    subgraph FASTAPI["FastAPI — Vercel Serverless"]
+        AUTH["/auth/*\nOAuth + JWT"]
+        PROFILES["/api/profiles\nCRUD + NLP"]
+        MW["Middleware\nCORS · Rate Limit · Logging"]
+    end
+
+    FASTAPI --> DB
+    FASTAPI --> EXT
+
+    subgraph DB["Neon PostgreSQL"]
+        T1[profiles]
+        T2[users]
+        T3[refresh_tokens]
+        T4[oauth_states]
+    end
+
+    subgraph EXT["External APIs"]
+        G[genderize.io]
+        A[agify.io]
+        N[nationalize.io]
+    end
 ```
 
 ### Module Layout
@@ -59,6 +62,25 @@ api/
 ---
 
 ## Authentication Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User / Browser
+    participant B as Backend (FastAPI)
+    participant GH as GitHub
+    participant DB as PostgreSQL
+
+    U->>B: GET /auth/github
+    B->>U: 302 → GitHub OAuth page
+    U->>GH: Authenticate
+    GH->>B: GET /auth/github/callback?code=&state=
+    B->>GH: POST exchange code → access_token
+    B->>GH: GET /user + /user/emails
+    GH-->>B: user info
+    B->>DB: upsert user, issue JWT pair
+    B->>DB: store hashed refresh token
+    B->>U: 302 → /dashboard (Set-Cookie: access_token, refresh_token, csrf_token)
+```
 
 ### Web Portal (Browser OAuth)
 
