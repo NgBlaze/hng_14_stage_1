@@ -1,0 +1,29 @@
+api/routes/auth.py
+  d2b3512aa6e99508 27-28
+api/routes/profiles.py
+  d2b3512aa6e99508 65,78
+api/services.py
+  d2b3512aa6e99508 168-169
+api/utils.py
+  d2b3512aa6e99508 1,9-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "3256d8a77653206f0d9a337b4271c38db0988b6b",
+  "prompts": {
+    "d2b3512aa6e99508": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "41b53a1a-d83e-4ccc-8e1f-d9673e45aa41",
+        "model": "<synthetic>"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 24,
+      "accepted_lines": 489,
+      "overriden_lines": 0
+    }
+  }
+}
