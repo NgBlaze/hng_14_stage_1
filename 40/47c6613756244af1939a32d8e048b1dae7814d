@@ -1,0 +1,23 @@
+api/auth.py
+  d2b3512aa6e99508 103-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "4047c6613756244af1939a32d8e048b1dae7814d",
+  "prompts": {
+    "d2b3512aa6e99508": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "41b53a1a-d83e-4ccc-8e1f-d9673e45aa41",
+        "model": "<synthetic>"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 2,
+      "accepted_lines": 483,
+      "overriden_lines": 0
+    }
+  }
+}
