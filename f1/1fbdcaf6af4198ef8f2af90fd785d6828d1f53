@@ -1,0 +1,23 @@
+api/index.py
+  d2b3512aa6e99508 26-33,38-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "f11fbdcaf6af4198ef8f2af90fd785d6828d1f53",
+  "prompts": {
+    "d2b3512aa6e99508": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "41b53a1a-d83e-4ccc-8e1f-d9673e45aa41",
+        "model": "<synthetic>"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 489,
+      "total_deletions": 4,
+      "accepted_lines": 489,
+      "overriden_lines": 0
+    }
+  }
+}
