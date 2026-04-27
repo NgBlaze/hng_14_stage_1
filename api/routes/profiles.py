@@ -62,7 +62,7 @@ async def create_profile(
 @limiter.limit("60/minute")
 async def export_profiles(
     request: Request,
-    format: str = Query(...),
+    fmt: str = Query(alias="format"),
     gender: Optional[str] = Query(default=None),
     age_group: Optional[str] = Query(default=None),
     country_id: Optional[str] = Query(default=None),
@@ -75,7 +75,7 @@ async def export_profiles(
     user=Depends(get_current_user),
     _=Depends(check_api_version),
 ):
-    if format.lower() != "csv":
+    if fmt.lower() != "csv":
         return JSONResponse(status_code=400, content={"status": "error", "message": "Only csv format is supported"})
 
     result = services.list_profiles(

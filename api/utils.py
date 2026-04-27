@@ -1,13 +1,14 @@
+import secrets
 import time
-import random
 from typing import Optional
 
 # ─── UUID v7 ──────────────────────────────────────────────────────────────────
 
 def generate_uuid7() -> str:
     ts_ms = int(time.time() * 1000)
-    rand_a = random.getrandbits(12)
-    rand_b = random.getrandbits(62)
+    rand = int.from_bytes(secrets.token_bytes(10), "big")
+    rand_a = rand >> 62 & 0xFFF         # 12 bits
+    rand_b = rand & ((1 << 62) - 1)     # 62 bits
     high = (ts_ms << 16) | (0x7 << 12) | rand_a
     low = (0b10 << 62) | rand_b
     hi = high.to_bytes(8, "big")

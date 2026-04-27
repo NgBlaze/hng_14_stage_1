@@ -23,8 +23,9 @@ ADMIN_GITHUB_USERNAMES = {
 
 
 def get_web_portal_url() -> str:
-    """Read at request time so Vercel env var changes take effect without redeployment."""
     return os.environ.get("WEB_PORTAL_URL", "").strip().rstrip("/")
+
+
 REFRESH_TOKEN_EXPIRE_MINUTES = 5
 
 router = APIRouter(prefix="/auth")
@@ -74,24 +75,6 @@ def _upsert_user(github_id: str, username: str, email: Optional[str], avatar_url
         db.commit()
         db.refresh(user)
     return user
-
-
-async def _fetch_github_user(gh_token: str) -> tuple[dict, Optional[str]]:
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        user_resp, email_resp = await asyncio.gather(
-            client.get(
-                "https://api.github.com/user",
-                headers={"Authorization": f"Bearer {gh_token}", "Accept": "application/json"},
-            ),
-            client.get(
-                "https://api.github.com/user/emails",
-                headers={"Authorization": f"Bearer {gh_token}", "Accept": "application/json"},
-            ),
-        )
-    gh_user = user_resp.json()
-    emails = email_resp.json() if isinstance(email_resp.json(), list) else []
-    primary_email = next((e["email"] for e in emails if e.get("primary")), gh_user.get("email"))
-    return gh_user, primary_email
 
 
 # ─── GET /auth/github ─────────────────────────────────────────────────────────

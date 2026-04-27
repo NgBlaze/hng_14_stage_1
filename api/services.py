@@ -165,6 +165,8 @@ def list_profiles(
         return {"status_code": 422, "body": {"status": "error", "message": "Invalid query parameters"}}
     if min_country_probability is not None and not (0.0 <= min_country_probability <= 1.0):
         return {"status_code": 422, "body": {"status": "error", "message": "Invalid query parameters"}}
+    page = max(1, page)
+    limit = max(1, min(limit, 100_000))
 
     db = SessionLocal()
     try:
