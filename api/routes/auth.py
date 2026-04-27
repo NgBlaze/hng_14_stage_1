@@ -24,7 +24,7 @@ ADMIN_GITHUB_USERNAMES = {
 
 def get_web_portal_url() -> str:
     """Read at request time so Vercel env var changes take effect without redeployment."""
-    return os.environ.get("WEB_PORTAL_URL", "").rstrip("/")
+    return os.environ.get("WEB_PORTAL_URL", "").strip().rstrip("/")
 REFRESH_TOKEN_EXPIRE_MINUTES = 5
 
 router = APIRouter(prefix="/auth")
@@ -194,10 +194,10 @@ async def github_oauth_callback(
     finally:
         db.close()
 
-    # Redirect to web portal if it's a separate deployment, otherwise show backend success page
+    # Redirect to web portal dashboard; fall back to /auth/success (which itself auto-redirects)
     _web_portal = get_web_portal_url()
-    portal = _web_portal if (_web_portal and _web_portal != BACKEND_URL) else None
-    redirect_url = f"{portal}/dashboard" if portal else f"{BACKEND_URL}/auth/success"
+    portal = _web_portal if (_web_portal and _web_portal != BACKEND_URL) else "https://hng-14-web-portal.vercel.app"
+    redirect_url = f"{portal}/dashboard"
 
     response = RedirectResponse(url=redirect_url)
     response.set_cookie("access_token", access_token, httponly=True, secure=True, samesite="none", max_age=180)
@@ -406,7 +406,7 @@ async def auth_success(request: Request):
             db.close()
 
     _wp = get_web_portal_url()
-    portal_url = _wp if (_wp and _wp != BACKEND_URL) else None
+    portal_url = _wp if (_wp and _wp != BACKEND_URL) else "https://hng-14-web-portal.vercel.app"
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -432,16 +432,29 @@ async def auth_success(request: Request):
     .btn:hover{{background:#4338ca}}
     .hint{{margin-top:1.25rem;color:#94a3b8;font-size:.8rem}}
     code{{background:#f1f5f9;padding:.2em .4em;border-radius:4px;font-size:.85em}}
+    .countdown{{color:#94a3b8;font-size:.8rem;margin-top:.75rem}}
   </style>
+  <script>
+    var dest = "{portal_url}/dashboard";
+    var secs = 2;
+    function tick() {{
+      var el = document.getElementById("cd");
+      if (el) el.textContent = secs;
+      if (secs <= 0) {{ window.location.href = dest; return; }}
+      secs--;
+      setTimeout(tick, 1000);
+    }}
+    window.addEventListener("load", tick);
+  </script>
 </head>
 <body>
   <div class="card">
     <div class="check">&#10003;</div>
     <h1>Logged in as <span class="username">@{username}</span></h1>
     <p>Authentication successful. Your session has been established.</p>
-    {"<a class='btn' href='" + portal_url + "/dashboard'>Open Web Portal</a>" if portal_url else
-     "<p style='color:#f59e0b;font-size:.85rem'>&#9888; Web portal not yet deployed.<br>Deploy it and set <code>WEB_PORTAL_URL</code> in your backend env.</p>"}
-    <div class="hint">
+    <a class="btn" href="{portal_url}/dashboard">Open Web Portal</a>
+    <div class="countdown">Redirecting in <span id="cd">2</span>s…</div>
+    <div class="hint" style="margin-top:1rem">
       CLI users: your session is active. Run <code>insighta whoami</code> to confirm.
     </div>
   </div>
