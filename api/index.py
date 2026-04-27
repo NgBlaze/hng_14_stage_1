@@ -23,14 +23,20 @@ app.state.limiter = limiter
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 
-_web_portal = os.environ.get("WEB_PORTAL_URL", "")
-_allowed_origins = [o for o in [_web_portal, "http://localhost:5173", "http://localhost:3000"] if o]
+_allowed_origins = [
+    "https://hng-14-web-portal.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+_env_portal = os.environ.get("WEB_PORTAL_URL", "").strip().rstrip("/")
+if _env_portal and _env_portal not in _allowed_origins:
+    _allowed_origins.append(_env_portal)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Version", "X-CSRF-Token"],
     allow_credentials=True,
 )
 
