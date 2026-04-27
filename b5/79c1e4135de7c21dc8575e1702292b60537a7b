@@ -1,0 +1,42 @@
+requirements.txt
+  d2b3512aa6e99508 7-8
+api/database.py
+  d2b3512aa6e99508 2,28,33,43,45-46,53
+api/limiter.py
+  d2b3512aa6e99508 1-22
+api/index.py
+  d2b3512aa6e99508 1-4,6,9,12-13,16-18,21-28,31,34,41-50,54-66,68-69,74
+api/auth.py
+  d2b3512aa6e99508 1-108
+api/models.py
+  d2b3512aa6e99508 1-4,37-83
+api/routes/auth.py
+  d2b3512aa6e99508 1-380
+api/routes/profiles.py
+  d2b3512aa6e99508 1-3,6-7,9-11,16-31,34-39,43,46,49-50,53,56-105,109,112,114,118-119,122,125-130,136,138,150-151,154-155,158,160-171,177-183,185,188,191-197,200-201
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "b579c1e4135de7c21dc8575e1702292b60537a7b",
+  "prompts": {
+    "d2b3512aa6e99508": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "41b53a1a-d83e-4ccc-8e1f-d9673e45aa41",
+        "model": "<synthetic>"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 751,
+      "total_deletions": 103,
+      "accepted_lines": 751,
+      "overriden_lines": 0
+    }
+  },
+  "humans": {
+    "h_17988937eb84f9": {
+      "author": "Precious Okolaa"
+    }
+  }
+}
