@@ -190,11 +190,13 @@ async def github_oauth_callback(
     finally:
         db.close()
 
-    response = RedirectResponse(url=f"{WEB_PORTAL_URL}/dashboard")
-    # HTTP-only auth cookies (not readable by JS)
+    # Redirect to web portal if it's a separate deployment, otherwise show backend success page
+    portal = WEB_PORTAL_URL if (WEB_PORTAL_URL and WEB_PORTAL_URL != BACKEND_URL) else None
+    redirect_url = f"{portal}/dashboard" if portal else f"{BACKEND_URL}/auth/success"
+
+    response = RedirectResponse(url=redirect_url)
     response.set_cookie("access_token", access_token, httponly=True, secure=True, samesite="none", max_age=180)
     response.set_cookie("refresh_token", refresh_raw, httponly=True, secure=True, samesite="none", max_age=300)
-    # CSRF token — JS-readable so Vue can send it as a header
     response.set_cookie("csrf_token", secrets.token_hex(32), httponly=False, secure=True, samesite="strict", max_age=180)
     return response
 
@@ -378,3 +380,67 @@ async def whoami(request: Request):
             "role": user.role,
         },
     })
+
+
+# ─── GET /auth/success (fallback page before web portal is deployed) ──────────
+
+@router.get("/success")
+async def auth_success(request: Request):
+    from fastapi.responses import HTMLResponse
+    from api.auth import decode_access_token
+
+    token = request.cookies.get("access_token")
+    payload = decode_access_token(token) if token else None
+    username = "unknown"
+
+    if payload:
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == payload["sub"]).first()
+            if user:
+                username = user.username
+        finally:
+            db.close()
+
+    portal_url = WEB_PORTAL_URL if (WEB_PORTAL_URL and WEB_PORTAL_URL != BACKEND_URL) else None
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Insighta Labs+ — Login Successful</title>
+  <style>
+    *{{box-sizing:border-box;margin:0;padding:0}}
+    body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+         background:#f8fafc;display:flex;align-items:center;justify-content:center;
+         min-height:100vh;padding:1rem}}
+    .card{{background:#fff;border:1px solid #e2e8f0;border-radius:16px;
+           padding:2.5rem;max-width:420px;width:100%;text-align:center;
+           box-shadow:0 4px 24px rgba(0,0,0,.06)}}
+    .check{{font-size:3rem;margin-bottom:1rem}}
+    h1{{font-size:1.4rem;font-weight:700;color:#1e293b;margin-bottom:.5rem}}
+    .username{{color:#4f46e5;font-weight:600}}
+    p{{color:#64748b;font-size:.9rem;margin-bottom:1.5rem;line-height:1.6}}
+    .btn{{display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;
+          padding:.75rem 1.5rem;border-radius:8px;font-weight:600;font-size:.9rem;
+          transition:background .2s}}
+    .btn:hover{{background:#4338ca}}
+    .hint{{margin-top:1.25rem;color:#94a3b8;font-size:.8rem}}
+    code{{background:#f1f5f9;padding:.2em .4em;border-radius:4px;font-size:.85em}}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="check">&#10003;</div>
+    <h1>Logged in as <span class="username">@{username}</span></h1>
+    <p>Authentication successful. Your session has been established.</p>
+    {"<a class='btn' href='" + portal_url + "/dashboard'>Open Web Portal</a>" if portal_url else
+     "<p style='color:#f59e0b;font-size:.85rem'>&#9888; Web portal not yet deployed.<br>Deploy it and set <code>WEB_PORTAL_URL</code> in your backend env.</p>"}
+    <div class="hint">
+      CLI users: your session is active. Run <code>insighta whoami</code> to confirm.
+    </div>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
