@@ -108,6 +108,22 @@ def require_admin(user=Depends(get_current_user)):
     return user
 
 
+def check_csrf(request: Request):
+    """Validate CSRF token for cookie-based write requests (POST/PUT/DELETE)."""
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    # Only enforce CSRF for cookie-authenticated requests (web portal)
+    if not request.cookies.get("access_token"):
+        return
+    csrf_cookie = request.cookies.get("csrf_token")
+    csrf_header = request.headers.get("X-CSRF-Token")
+    if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+        raise HTTPException(
+            status_code=403,
+            detail={"status": "error", "message": "CSRF validation failed"},
+        )
+
+
 def check_api_version(request: Request, x_api_version: Optional[str] = Header(default=None)):
     # also accept ?api_version=1 for browser-navigable endpoints (e.g. CSV export)
     effective = x_api_version or request.query_params.get("api_version")
