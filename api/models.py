@@ -73,6 +73,7 @@ class OAuthState(Base):
     id = Column(String, primary_key=True)
     state = Column(String, unique=True, nullable=False, index=True)
     code_challenge = Column(String)
+    code_verifier = Column(String)
     cli_port = Column(Integer)
     source = Column(String, nullable=False)  # 'web' or 'cli'
     expires_at = Column(DateTime(timezone=True), nullable=False)

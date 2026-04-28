@@ -3,7 +3,7 @@ import base64
 import os
 import secrets
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, Tuple
 
 import jwt
 from fastapi import Depends, Header, HTTPException, Request
@@ -44,6 +44,14 @@ def decode_access_token(token: str) -> Optional[dict]:
         return payload
     except jwt.PyJWTError:
         return None
+
+
+def generate_pkce_pair() -> Tuple[str, str]:
+    """Return (code_verifier, code_challenge) for S256 PKCE."""
+    code_verifier = secrets.token_urlsafe(43)
+    digest = hashlib.sha256(code_verifier.encode()).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    return code_verifier, code_challenge
 
 
 def verify_pkce(code_verifier: str, code_challenge: str) -> bool:

@@ -1,5 +1,4 @@
 import logging
-import os
 import time
 
 from fastapi import FastAPI, Request
@@ -12,6 +11,7 @@ from api.database import init_db
 from api.limiter import limiter
 from api.routes.auth import router as auth_router
 from api.routes.profiles import router as profiles_router
+from api.routes.users import router as users_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -23,18 +23,9 @@ app.state.limiter = limiter
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 
-_allowed_origins = [
-    "https://hng-14-web-portal.vercel.app",
-    "http://localhost:5173",
-    "http://localhost:3000",
-]
-_env_portal = os.environ.get("WEB_PORTAL_URL", "").strip().rstrip("/")
-if _env_portal and _env_portal not in _allowed_origins:
-    _allowed_origins.append(_env_portal)
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_allowed_origins,
+    allow_origin_regex=r".*",  # echo back any origin; credentials still require exact match per spec
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-API-Version", "X-CSRF-Token"],
     allow_credentials=True,
@@ -79,3 +70,4 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
 
 app.include_router(auth_router)
 app.include_router(profiles_router)
+app.include_router(users_router)

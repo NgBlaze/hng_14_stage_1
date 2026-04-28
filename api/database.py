@@ -42,6 +42,18 @@ def init_db():
         except Exception:
             pass
 
+        # oauth_states: add code_verifier if missing
+        try:
+            if _raw_url.startswith("sqlite"):
+                conn.execute(text("ALTER TABLE oauth_states ADD COLUMN code_verifier VARCHAR"))
+            else:
+                conn.execute(text(
+                    "ALTER TABLE oauth_states ADD COLUMN IF NOT EXISTS code_verifier VARCHAR"
+                ))
+            conn.commit()
+        except Exception:
+            pass
+
         # profiles: indexes
         for stmt in [
             "CREATE INDEX IF NOT EXISTS ix_profiles_gender ON profiles (gender)",
