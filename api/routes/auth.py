@@ -164,13 +164,14 @@ async def github_oauth_start(request: Request, _=Depends(auth_rate_limit)):
         db.close()
 
     callback_url = f"{BACKEND_URL}/auth/github/callback"
+    # GitHub App: scope is derived from App permissions; no scope= needed.
+    # We keep response_type, state, and PKCE challenge.
     github_url = (
         f"https://github.com/login/oauth/authorize"
         f"?response_type=code"
         f"&client_id={GITHUB_CLIENT_ID}"
         f"&redirect_uri={callback_url}"
         f"&state={state}"
-        f"&scope=read:user%20user:email"
         f"&code_challenge={code_challenge}"
         f"&code_challenge_method=S256"
     )

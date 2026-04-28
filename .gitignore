@@ -4,3 +4,4 @@ __pycache__/
 *.db
 .vercel
 venv/
+task_3.md
