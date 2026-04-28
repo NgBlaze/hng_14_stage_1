@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse, Response
 
 from api import services
 from api.auth import check_api_version, check_csrf, get_current_user, require_admin
-from api.limiter import limiter
+from api.ratelimit import api_rate_limit
 
 router = APIRouter(prefix="/api/profiles")
 
@@ -31,12 +31,13 @@ def _pagination_links(base: str, filters: dict, page: int, limit: int, total: in
 # ─── POST /api/profiles (admin only) ─────────────────────────────────────────
 
 @router.post("")
-@limiter.limit("60/minute")
+
 async def create_profile(
     request: Request,
     user=Depends(require_admin),
     _=Depends(check_api_version),
     __=Depends(check_csrf),
+    ___=Depends(api_rate_limit),
 ):
     try:
         body = await request.json()
@@ -60,7 +61,7 @@ async def create_profile(
 # ─── GET /api/profiles/export ─────────────────────────────────────────────────
 
 @router.get("/export")
-@limiter.limit("60/minute")
+
 async def export_profiles(
     request: Request,
     fmt: str = Query(alias="format"),
@@ -75,6 +76,7 @@ async def export_profiles(
     order: str = Query(default="asc"),
     user=Depends(get_current_user),
     _=Depends(check_api_version),
+    __=Depends(api_rate_limit),
 ):
     if fmt.lower() != "csv":
         return JSONResponse(status_code=400, content={"status": "error", "message": "Only csv format is supported"})
@@ -110,7 +112,7 @@ async def export_profiles(
 # ─── GET /api/profiles/search ─────────────────────────────────────────────────
 
 @router.get("/search")
-@limiter.limit("60/minute")
+
 async def search_profiles(
     request: Request,
     q: Optional[str] = Query(default=None),
@@ -118,6 +120,7 @@ async def search_profiles(
     limit: int = Query(default=10, ge=1, le=50),
     user=Depends(get_current_user),
     _=Depends(check_api_version),
+    __=Depends(api_rate_limit),
 ):
     if not q or not q.strip():
         return JSONResponse(status_code=400, content={"status": "error", "message": "Missing or empty query"})
@@ -134,7 +137,7 @@ async def search_profiles(
 # ─── GET /api/profiles ────────────────────────────────────────────────────────
 
 @router.get("")
-@limiter.limit("60/minute")
+
 async def list_profiles(
     request: Request,
     gender: Optional[str] = Query(default=None),
@@ -150,6 +153,7 @@ async def list_profiles(
     limit: int = Query(default=10, ge=1, le=50),
     user=Depends(get_current_user),
     _=Depends(check_api_version),
+    __=Depends(api_rate_limit),
 ):
     result = services.list_profiles(
         gender=gender, age_group=age_group, country_id=country_id,
@@ -175,12 +179,13 @@ async def list_profiles(
 # ─── GET /api/profiles/{id} ───────────────────────────────────────────────────
 
 @router.get("/{profile_id}")
-@limiter.limit("60/minute")
+
 async def get_profile(
     request: Request,
     profile_id: str = Path(...),
     user=Depends(get_current_user),
     _=Depends(check_api_version),
+    __=Depends(api_rate_limit),
 ):
     result = services.get_profile_by_id(profile_id)
     return JSONResponse(status_code=result["status_code"], content=result["body"])
@@ -189,13 +194,14 @@ async def get_profile(
 # ─── DELETE /api/profiles/{id} (admin only) ───────────────────────────────────
 
 @router.delete("/{profile_id}")
-@limiter.limit("60/minute")
+
 async def delete_profile(
     request: Request,
     profile_id: str = Path(...),
     user=Depends(require_admin),
     _=Depends(check_api_version),
     __=Depends(check_csrf),
+    ___=Depends(api_rate_limit),
 ):
     result = services.delete_profile_by_id(profile_id)
     if result["status_code"] == 204:

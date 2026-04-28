@@ -2,14 +2,17 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from api.auth import get_current_user
-from api.limiter import limiter
+from api.ratelimit import api_rate_limit
 
 router = APIRouter(prefix="/api/users")
 
 
 @router.get("/me")
-@limiter.limit("60/minute")
-async def get_me(request: Request, user=Depends(get_current_user)):
+async def get_me(
+    request: Request,
+    user=Depends(get_current_user),
+    _=Depends(api_rate_limit),
+):
     return JSONResponse(content={
         "status": "success",
         "data": {
