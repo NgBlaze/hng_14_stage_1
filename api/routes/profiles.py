@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import JSONResponse, Response
 
 from api import services
-from api.auth import check_api_version, get_current_user, require_admin
+from api.auth import check_api_version, check_csrf, get_current_user, require_admin
 from api.limiter import limiter
 
 router = APIRouter(prefix="/api/profiles")
@@ -36,6 +36,7 @@ async def create_profile(
     request: Request,
     user=Depends(require_admin),
     _=Depends(check_api_version),
+    __=Depends(check_csrf),
 ):
     try:
         body = await request.json()
@@ -194,6 +195,7 @@ async def delete_profile(
     profile_id: str = Path(...),
     user=Depends(require_admin),
     _=Depends(check_api_version),
+    __=Depends(check_csrf),
 ):
     result = services.delete_profile_by_id(profile_id)
     if result["status_code"] == 204:
