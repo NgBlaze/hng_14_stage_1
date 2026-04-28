@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
 from slowapi.util import get_remote_address
 
-from api.auth import create_access_token, create_refresh_token, get_current_user, hash_token, verify_pkce
+from api.auth import create_access_token, create_refresh_token, generate_pkce_pair, get_current_user, hash_token, verify_pkce
 from api.database import SessionLocal
 from api.limiter import limiter
 from api.models import OAuthState, RefreshToken, User
@@ -80,15 +80,19 @@ def _upsert_user(github_id: str, username: str, email: Optional[str], avatar_url
 # ─── GET /auth/github ─────────────────────────────────────────────────────────
 
 @router.get("/github")
-@limiter.limit("10/minute", key_func=get_remote_address)
+@limiter.limit("20/minute", key_func=get_remote_address)
 async def github_oauth_start(request: Request):
-    """Initiate GitHub OAuth for web portal."""
+    """Initiate GitHub OAuth for web portal (PKCE S256)."""
     state = secrets.token_urlsafe(32)
+    code_verifier, code_challenge = generate_pkce_pair()
+
     db = SessionLocal()
     try:
         db.add(OAuthState(
             id=generate_uuid7(),
             state=state,
+            code_challenge=code_challenge,
+            code_verifier=code_verifier,
             source="web",
             expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
         ))
@@ -103,16 +107,18 @@ async def github_oauth_start(request: Request):
         f"&redirect_uri={callback_url}"
         f"&state={state}"
         f"&scope=read:user,user:email"
+        f"&code_challenge={code_challenge}"
+        f"&code_challenge_method=S256"
     )
     response = RedirectResponse(url=github_url)
-    response.set_cookie("oauth_state", state, httponly=True, secure=True, samesite="lax", max_age=600)
+    response.set_cookie("oauth_state", state, httponly=False, secure=True, samesite="lax", max_age=600)
     return response
 
 
 # ─── GET /auth/github/callback ────────────────────────────────────────────────
 
 @router.get("/github/callback")
-@limiter.limit("10/minute", key_func=get_remote_address)
+@limiter.limit("20/minute", key_func=get_remote_address)
 async def github_oauth_callback(
     request: Request,
     code: Optional[str] = Query(default=None),
@@ -120,8 +126,12 @@ async def github_oauth_callback(
     error: Optional[str] = Query(default=None),
 ):
     """Handle GitHub OAuth redirect for web portal."""
-    if error or not code or not state:
-        return RedirectResponse(url=f"{get_web_portal_url()}/login?error=oauth_failed")
+    if error:
+        raise HTTPException(status_code=400, detail={"status": "error", "message": f"OAuth error: {error}"})
+    if not code:
+        raise HTTPException(status_code=400, detail={"status": "error", "message": "Missing required parameter: code"})
+    if not state:
+        raise HTTPException(status_code=400, detail={"status": "error", "message": "Missing required parameter: state"})
 
     db = SessionLocal()
     try:
@@ -135,27 +145,34 @@ async def github_oauth_callback(
             )
             .first()
         )
-        if not oauth_state or oauth_state.expires_at.replace(tzinfo=timezone.utc) < now:
-            return RedirectResponse(url=f"{get_web_portal_url()}/login?error=invalid_state")
+        if not oauth_state:
+            raise HTTPException(status_code=400, detail={"status": "error", "message": "Invalid state parameter"})
+        if oauth_state.expires_at.replace(tzinfo=timezone.utc) < now:
+            raise HTTPException(status_code=400, detail={"status": "error", "message": "State parameter expired"})
 
+        code_verifier = oauth_state.code_verifier
         oauth_state.used = True
         db.commit()
 
-        # Exchange code for GitHub access token
+        # Exchange code for GitHub access token (include code_verifier for PKCE)
+        exchange_payload = {
+            "client_id": GITHUB_CLIENT_ID,
+            "client_secret": GITHUB_CLIENT_SECRET,
+            "code": code,
+            "redirect_uri": f"{BACKEND_URL}/auth/github/callback",
+        }
+        if code_verifier:
+            exchange_payload["code_verifier"] = code_verifier
+
         async with httpx.AsyncClient(timeout=10.0) as client:
             token_resp = await client.post(
                 "https://github.com/login/oauth/access_token",
-                json={
-                    "client_id": GITHUB_CLIENT_ID,
-                    "client_secret": GITHUB_CLIENT_SECRET,
-                    "code": code,
-                    "redirect_uri": f"{BACKEND_URL}/auth/github/callback",
-                },
+                json=exchange_payload,
                 headers={"Accept": "application/json"},
             )
         gh_token = token_resp.json().get("access_token")
         if not gh_token:
-            return RedirectResponse(url=f"{get_web_portal_url()}/login?error=token_exchange_failed")
+            raise HTTPException(status_code=502, detail={"status": "error", "message": "GitHub token exchange failed"})
 
         # Fetch GitHub user info
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -177,7 +194,6 @@ async def github_oauth_callback(
     finally:
         db.close()
 
-    # Redirect to web portal dashboard; fall back to /auth/success (which itself auto-redirects)
     _web_portal = get_web_portal_url()
     portal = _web_portal if (_web_portal and _web_portal != BACKEND_URL) else "https://hng-14-web-portal.vercel.app"
     redirect_url = f"{portal}/dashboard"
@@ -214,7 +230,7 @@ async def cli_exchange(request: Request):
     if not verify_pkce(code_verifier, code_challenge):
         raise HTTPException(status_code=400, detail={"status": "error", "message": "PKCE verification failed"})
 
-    # Exchange code with GitHub
+    # Exchange code with GitHub (include code_verifier for PKCE)
     async with httpx.AsyncClient(timeout=10.0) as client:
         token_resp = await client.post(
             "https://github.com/login/oauth/access_token",
@@ -223,6 +239,7 @@ async def cli_exchange(request: Request):
                 "client_secret": GITHUB_CLIENT_SECRET,
                 "code": code,
                 "redirect_uri": redirect_uri,
+                "code_verifier": code_verifier,
             },
             headers={"Accept": "application/json"},
         )
