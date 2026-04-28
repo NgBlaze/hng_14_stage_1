@@ -1,0 +1,31 @@
+api/routes/users.py
+  7eaf12345b807344 5,11-15
+api/routes/profiles.py
+  7eaf12345b807344 11,34,40,64,79,115,123,140,156,182,188,197,204
+api/ratelimit.py
+  7eaf12345b807344 1-12,15-20,23-46,51-54,56-112,115-118
+api/routes/auth.py
+  7eaf12345b807344 13,32-51,72-73,80,101-102,147,169-170,173,177-187,199,208-209,212,292,297,307-308,311,364-365,376-397,401,445-446,458-459,463-464,470-480,492,505,529-535
+api/index.py
+  7eaf12345b807344 21-24,26,38-45,64-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "92a7d71727d5918720209fe3e7f124b37263791f",
+  "prompts": {
+    "7eaf12345b807344": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "000fb6d1-b151-4be4-b154-656266fecefa",
+        "model": "<synthetic>"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 262,
+      "total_deletions": 145,
+      "accepted_lines": 261,
+      "overriden_lines": 0
+    }
+  }
+}
