@@ -418,6 +418,7 @@ async def refresh_tokens(request: Request):
 # ─── POST /auth/logout ────────────────────────────────────────────────────────
 
 @router.post("/logout")
+@limiter.limit("10/minute", key_func=get_remote_address)
 async def logout(request: Request):
     refresh_raw = None
     try:
@@ -453,7 +454,8 @@ async def logout(request: Request):
 # ─── GET /auth/whoami ─────────────────────────────────────────────────────────
 
 @router.get("/whoami")
-async def whoami(user=Depends(get_current_user)):
+@limiter.limit("10/minute", key_func=get_remote_address)
+async def whoami(request: Request, user=Depends(get_current_user)):
     return JSONResponse(content={
         "status": "success",
         "data": {
