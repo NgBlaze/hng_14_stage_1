@@ -1,0 +1,38 @@
+task_3.md
+  50c32435d38bbcd4 1-479
+api/routes/auth.py
+  7eaf12345b807344 167-168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "b51d300a4d0aef6e0fd9d4271e7b919a48cc7226",
+  "prompts": {
+    "50c32435d38bbcd4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "052612f0-a6fa-4d5e-b028-277e6d58cf44",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 479,
+      "overriden_lines": 0
+    },
+    "7eaf12345b807344": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "000fb6d1-b151-4be4-b154-656266fecefa",
+        "model": "<synthetic>"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 1,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}
