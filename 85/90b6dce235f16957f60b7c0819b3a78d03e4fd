@@ -1,0 +1,23 @@
+api/routes/auth.py
+  211850f422a9c060 358-364,374
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "8590b6dce235f16957f60b7c0819b3a78d03e4fd",
+  "prompts": {
+    "211850f422a9c060": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c11124da-beef-401c-9d32-d15a905808b5",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 16,
+      "total_deletions": 14,
+      "accepted_lines": 8,
+      "overriden_lines": 3
+    }
+  }
+}
