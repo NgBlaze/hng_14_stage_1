@@ -72,19 +72,23 @@ def _issue_token_pair(user_id: str, role: str, db) -> tuple[str, str]:
     return access_token, refresh_raw
 
 
-def _set_secure_cookie(response, name: str, value: str, max_age: int, samesite: str = "none") -> None:
-    """Append a Set-Cookie header with explicit HttpOnly so any grader parser
-    sees the flag verbatim. Starlette's set_cookie also emits HttpOnly, but
-    some checkers do strict substring matching on the raw header — building
-    it ourselves removes ambiguity."""
+def _set_secure_cookie(
+    response, name: str, value: str, max_age: int,
+    samesite: str = "none", httponly: bool = True,
+) -> None:
+    """Append a Set-Cookie header. HttpOnly is opt-out: credentials
+    (access_token, refresh_token) keep it; csrf_token must be JS-readable
+    so the SPA can echo it back as the X-CSRF-Token header (double-submit
+    pattern)."""
     parts = [
         f"{name}={value}",
         "Path=/",
         f"Max-Age={max_age}",
         f"SameSite={samesite.capitalize()}",
         "Secure",
-        "HttpOnly",
     ]
+    if httponly:
+        parts.append("HttpOnly")
     response.raw_headers.append((b"set-cookie", "; ".join(parts).encode("latin-1")))
 
 
@@ -556,6 +560,19 @@ async def analyst_token_alias(request: Request):
         db.close()
 
 
+# ─── GET /auth/csrf ───────────────────────────────────────────────────────────
+# csrf_token cookie is HttpOnly (security requirement), so the SPA cannot read
+# it via document.cookie. This endpoint echoes the cookie value back in JSON
+# so the SPA can cache it and send it as the X-CSRF-Token header on writes.
+
+@router.get("/csrf")
+async def get_csrf(request: Request):
+    token = request.cookies.get("csrf_token")
+    if not token:
+        raise HTTPException(status_code=401, detail={"status": "error", "message": "No CSRF token; log in first"})
+    return JSONResponse(content={"status": "success", "csrf_token": token})
+
+
 # ─── POST /auth/refresh ───────────────────────────────────────────────────────
 
 @router.post("/refresh")
@@ -599,17 +616,19 @@ async def refresh_tokens(request: Request, _=Depends(auth_rate_limit)):
     finally:
         db.close()
 
+    new_csrf = secrets.token_hex(32)
     response = JSONResponse(content={
         "status": "success",
         "access_token": access_token,
         "refresh_token": new_refresh_raw,
+        "csrf_token": new_csrf,
         "token_type": "Bearer",
         "expires_in": 180,
     })
     if request.cookies.get("refresh_token"):
         _set_secure_cookie(response, "access_token", access_token, 180)
         _set_secure_cookie(response, "refresh_token", new_refresh_raw, 300)
-        _set_secure_cookie(response, "csrf_token", secrets.token_hex(32), 180, samesite="strict")
+        _set_secure_cookie(response, "csrf_token", new_csrf, 180, samesite="strict")
     return response
 
 
