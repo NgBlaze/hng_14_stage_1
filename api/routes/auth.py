@@ -355,6 +355,13 @@ async def cli_exchange(request: Request, _=Depends(auth_rate_limit)):
     try:
         user = _upsert_user(str(gh_user["id"]), gh_user["login"], primary_email, gh_user.get("avatar_url", ""), db)
         access_token, refresh_raw = _issue_token_pair(user.id, user.role, db)
+        user_payload = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "avatar_url": user.avatar_url,
+            "role": user.role,
+        }
     finally:
         db.close()
 
@@ -364,13 +371,7 @@ async def cli_exchange(request: Request, _=Depends(auth_rate_limit)):
         "refresh_token": refresh_raw,
         "token_type": "Bearer",
         "expires_in": 180,
-        "user": {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "avatar_url": user.avatar_url,
-            "role": user.role,
-        },
+        "user": user_payload,
     })
 
 
