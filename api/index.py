@@ -1,4 +1,5 @@
 import logging
+import sys
 import time
 
 from fastapi import FastAPI, Request
@@ -11,8 +12,16 @@ from api.routes.auth import router as auth_router
 from api.routes.profiles import router as profiles_router
 from api.routes.users import router as users_router
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+# `force=True` overrides any handler Vercel/uvicorn installed earlier so our
+# INFO logs are guaranteed to surface in the function logs panel.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    stream=sys.stdout,
+    force=True,
+)
 logger = logging.getLogger(__name__)
+logger.info("api boot: insighta labs+ starting up")
 
 app = FastAPI(title="Insighta Labs+ API")
 
