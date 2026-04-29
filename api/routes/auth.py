@@ -164,13 +164,14 @@ async def github_oauth_start(request: Request, _=Depends(auth_rate_limit)):
         db.close()
 
     callback_url = f"{BACKEND_URL}/auth/github/callback"
+    # GitHub App: scope is derived from App permissions; no scope= needed.
+    # We keep response_type, state, and PKCE challenge.
     github_url = (
         f"https://github.com/login/oauth/authorize"
         f"?response_type=code"
         f"&client_id={GITHUB_CLIENT_ID}"
         f"&redirect_uri={callback_url}"
         f"&state={state}"
-        f"&scope=read:user%20user:email"
         f"&code_challenge={code_challenge}"
         f"&code_challenge_method=S256"
     )
@@ -354,6 +355,13 @@ async def cli_exchange(request: Request, _=Depends(auth_rate_limit)):
     try:
         user = _upsert_user(str(gh_user["id"]), gh_user["login"], primary_email, gh_user.get("avatar_url", ""), db)
         access_token, refresh_raw = _issue_token_pair(user.id, user.role, db)
+        user_payload = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "avatar_url": user.avatar_url,
+            "role": user.role,
+        }
     finally:
         db.close()
 
@@ -363,13 +371,7 @@ async def cli_exchange(request: Request, _=Depends(auth_rate_limit)):
         "refresh_token": refresh_raw,
         "token_type": "Bearer",
         "expires_in": 180,
-        "user": {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "avatar_url": user.avatar_url,
-            "role": user.role,
-        },
+        "user": user_payload,
     })
 
 
