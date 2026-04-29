@@ -99,7 +99,7 @@ def _check(key: str, limit: int, window_seconds: int = 60):
     finally:
         db.close()
 
-    if count > limit:
+    if count >= limit:
         # Compute seconds until the current window closes so clients (and
         # urllib3's retry-on-429 logic) can back off correctly instead of
         # hammering us into more 429s.
