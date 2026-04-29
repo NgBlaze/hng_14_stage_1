@@ -53,9 +53,14 @@ async def validation_handler(request: Request, exc: RequestValidationError):
 
 @app.exception_handler(HTTPException)
 async def http_handler(request: Request, exc: HTTPException):
+    headers = getattr(exc, "headers", None)
     if isinstance(exc.detail, dict):
-        return JSONResponse(status_code=exc.status_code, content=exc.detail)
-    return JSONResponse(status_code=exc.status_code, content={"status": "error", "message": exc.detail})
+        return JSONResponse(status_code=exc.status_code, content=exc.detail, headers=headers)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"status": "error", "message": exc.detail},
+        headers=headers,
+    )
 
 
 app.include_router(auth_router)
