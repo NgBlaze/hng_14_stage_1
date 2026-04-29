@@ -100,16 +100,27 @@ def _check(key: str, limit: int, window_seconds: int = 60):
         db.close()
 
     if count > limit:
+        # Compute seconds until the current window closes so clients (and
+        # urllib3's retry-on-429 logic) can back off correctly instead of
+        # hammering us into more 429s.
+        retry_after = max(1, window_seconds - (now - window_start))
         raise HTTPException(
             status_code=429,
             detail={"status": "error", "message": "Rate limit exceeded. Please try again later."},
+            headers={"Retry-After": str(retry_after)},
         )
 
 
 def auth_rate_limit(request: Request):
-    """10 requests / minute on /auth/* per IP."""
+    """10 requests / minute on /auth/* per IP, bucketed per route.
+
+    Per-route buckets prevent heavy traffic on one endpoint (e.g. /auth/github)
+    from starving sibling endpoints (e.g. /auth/github/callback,
+    /auth/github/exchange) used to obtain tokens.
+    """
     ident = _identity(request)
-    _check(f"auth:{ident}", limit=10, window_seconds=60)
+    route = request.url.path.rstrip("/") or "/"
+    _check(f"auth:{route}:{ident}", limit=10, window_seconds=60)
 
 
 def api_rate_limit(request: Request):
