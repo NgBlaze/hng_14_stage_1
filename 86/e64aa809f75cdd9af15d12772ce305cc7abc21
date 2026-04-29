@@ -1,0 +1,36 @@
+api/routes/auth.py
+  6ca161dabd6801bc 75-82,90-91,563-575,619,624,631
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "86e64aa809f75cdd9af15d12772ce305cc7abc21",
+  "prompts": {
+    "6ca161dabd6801bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c643bc74-f0f9-4685-a701-7f8c6ae68a65",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 36,
+      "total_deletions": 17,
+      "accepted_lines": 30,
+      "overriden_lines": 0
+    },
+    "88d7f1be13af3a79": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e8036cd-8de3-4435-89d4-110001b582cc",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Precious Okolaa",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 0,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    }
+  }
+}
