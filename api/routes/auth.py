@@ -165,10 +165,6 @@ def _issue_dual_test_tokens(db) -> JSONResponse:
         "status": "success",
         "access_token": admin_access,
         "refresh_token": admin_refresh,
-        # Top-level grader-expected aliases (per grader_tokens.json contract).
-        "admin_test_token": admin_access,
-        "analyst_test_token": analyst_access,
-        "refresh_test_token": admin_refresh,
         "token_type": "Bearer",
         "expires_in": 180,
         "admin": {
