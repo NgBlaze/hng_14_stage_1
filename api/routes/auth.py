@@ -144,7 +144,7 @@ def _issue_test_tokens(role: str, db) -> JSONResponse:
     })
     _set_secure_cookie(response, "access_token", access_token, 180)
     _set_secure_cookie(response, "refresh_token", refresh_raw, 300)
-    _set_secure_cookie(response, "csrf_token", secrets.token_hex(32), 180, samesite="strict")
+    _set_secure_cookie(response, "csrf_token", secrets.token_hex(32), 180)
     return response
 
 
@@ -198,7 +198,7 @@ def _issue_dual_test_tokens(db) -> JSONResponse:
     })
     _set_secure_cookie(response, "access_token", admin_access, 180)
     _set_secure_cookie(response, "refresh_token", admin_refresh, 300)
-    _set_secure_cookie(response, "csrf_token", secrets.token_hex(32), 180, samesite="strict")
+    _set_secure_cookie(response, "csrf_token", secrets.token_hex(32), 180)
     return response
 
 
@@ -394,7 +394,7 @@ async def github_oauth_callback(
     response = RedirectResponse(url=redirect_url)
     _set_secure_cookie(response, "access_token", access_token, 180)
     _set_secure_cookie(response, "refresh_token", refresh_raw, 300)
-    _set_secure_cookie(response, "csrf_token", secrets.token_hex(32), 180, samesite="strict")
+    _set_secure_cookie(response, "csrf_token", secrets.token_hex(32), 180)
     return response
 
 
@@ -628,7 +628,7 @@ async def refresh_tokens(request: Request, _=Depends(auth_rate_limit)):
     if request.cookies.get("refresh_token"):
         _set_secure_cookie(response, "access_token", access_token, 180)
         _set_secure_cookie(response, "refresh_token", new_refresh_raw, 300)
-        _set_secure_cookie(response, "csrf_token", new_csrf, 180, samesite="strict")
+        _set_secure_cookie(response, "csrf_token", new_csrf, 180)
     return response
 
 
@@ -670,7 +670,7 @@ async def logout(request: Request, _=Depends(auth_rate_limit)):
     response = JSONResponse(content={"status": "success", "message": "Logged out"})
     _set_secure_cookie(response, "access_token", "", 0)
     _set_secure_cookie(response, "refresh_token", "", 0)
-    _set_secure_cookie(response, "csrf_token", "", 0, samesite="strict")
+    _set_secure_cookie(response, "csrf_token", "", 0)
     return response
 
 
