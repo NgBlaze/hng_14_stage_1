@@ -3,6 +3,9 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
+from sqlalchemy.exc import IntegrityError
+
+from api.cache import cache_get, cache_set, invalidate_profile_caches
 from api.database import SessionLocal
 from api.models import Profile, row_to_dict
 from api.utils import generate_uuid7, classify_age, COUNTRY_NAMES
@@ -105,23 +108,24 @@ async def create_profile_from_name(name: str) -> dict:
             created_at=now,
         )
         db.add(profile)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # Concurrent insert lost the race on the unique-name constraint —
+            # fall back to the row the winner committed.
+            db.rollback()
+            existing = db.query(Profile).filter(Profile.name == name).first()
+            if existing:
+                return {
+                    "status_code": 200,
+                    "body": {"status": "success", "message": "Profile already exists", "data": row_to_dict(existing)},
+                }
+            raise
         db.refresh(profile)
+        invalidate_profile_caches()
         return {
             "status_code": 201,
             "body": {"status": "success", "data": row_to_dict(profile)},
-        }
-    except Exception:
-        db.rollback()
-        existing = db.query(Profile).filter(Profile.name == name).first()
-        if existing:
-            return {
-                "status_code": 200,
-                "body": {"status": "success", "message": "Profile already exists", "data": row_to_dict(existing)},
-            }
-        return {
-            "status_code": 500,
-            "body": {"status": "error", "message": "Internal server error"},
         }
     finally:
         db.close()
@@ -168,6 +172,16 @@ def list_profiles(
     page = max(1, page)
     limit = max(1, min(limit, 100_000))
 
+    cache_key = (
+        "profiles:list:"
+        f"{gender}:{age_group}:{country_id}:{min_age}:{max_age}:"
+        f"{min_gender_probability}:{min_country_probability}:"
+        f"{sort_by}:{order}:{page}:{limit}"
+    )
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return {"status_code": 200, "body": cached}
+
     db = SessionLocal()
     try:
         q = db.query(Profile)
@@ -196,16 +210,15 @@ def list_profiles(
         offset = (page - 1) * limit
         profiles = q.offset(offset).limit(limit).all()
 
-        return {
-            "status_code": 200,
-            "body": {
-                "status": "success",
-                "page": page,
-                "limit": limit,
-                "total": total,
-                "data": [row_to_dict(p) for p in profiles],
-            },
+        body = {
+            "status": "success",
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "data": [row_to_dict(p) for p in profiles],
         }
+        cache_set(cache_key, body, ttl=60)
+        return {"status_code": 200, "body": body}
     finally:
         db.close()
 
@@ -222,6 +235,11 @@ def search_profiles(q: str, page: int = 1, limit: int = 10) -> dict:
             "status_code": 422,
             "body": {"status": "error", "message": "Unable to interpret query"},
         }
+
+    cache_key = f"profiles:search:{q.strip().lower()}:{page}:{limit}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return {"status_code": 200, "body": cached}
 
     db = SessionLocal()
     try:
@@ -241,16 +259,15 @@ def search_profiles(q: str, page: int = 1, limit: int = 10) -> dict:
         offset = (page - 1) * limit
         profiles = query.offset(offset).limit(limit).all()
 
-        return {
-            "status_code": 200,
-            "body": {
-                "status": "success",
-                "page": page,
-                "limit": limit,
-                "total": total,
-                "data": [row_to_dict(p) for p in profiles],
-            },
+        body = {
+            "status": "success",
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "data": [row_to_dict(p) for p in profiles],
         }
+        cache_set(cache_key, body, ttl=60)
+        return {"status_code": 200, "body": body}
     finally:
         db.close()
 
@@ -287,6 +304,7 @@ def delete_profile_by_id(profile_id: str) -> dict:
             }
         db.delete(p)
         db.commit()
+        invalidate_profile_caches()
         return {"status_code": 204, "body": None}
     finally:
         db.close()
