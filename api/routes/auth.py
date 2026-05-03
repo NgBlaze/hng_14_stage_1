@@ -7,6 +7,7 @@ from typing import Optional
 import httpx
 from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse, Response
+from sqlalchemy import text
 
 from api.auth import create_access_token, create_refresh_token, generate_pkce_pair, get_current_user, hash_token, verify_pkce
 from api.database import SessionLocal
@@ -331,23 +332,28 @@ async def github_oauth_callback(
     db = SessionLocal()
     try:
         now = datetime.now(timezone.utc)
-        oauth_state = (
-            db.query(OAuthState)
-            .filter(
-                OAuthState.state == state,
-                OAuthState.source == "web",
-                OAuthState.used.is_(False),
-            )
-            .first()
-        )
-        if not oauth_state:
-            raise HTTPException(status_code=400, detail={"status": "error", "message": "Invalid state parameter"})
-        if oauth_state.expires_at.replace(tzinfo=timezone.utc) < now:
-            raise HTTPException(status_code=400, detail={"status": "error", "message": "State parameter expired"})
-
-        code_verifier = oauth_state.code_verifier
-        oauth_state.used = True
+        # Atomic single-use claim — prevents replay if two callbacks arrive
+        # in parallel for the same state value.
+        claimed = db.execute(
+            text(
+                """
+                UPDATE oauth_states
+                   SET used = true
+                 WHERE state = :s
+                   AND source = 'web'
+                   AND used = false
+             RETURNING code_verifier, expires_at
+                """
+            ),
+            {"s": state},
+        ).first()
         db.commit()
+        if not claimed:
+            raise HTTPException(status_code=400, detail={"status": "error", "message": "Invalid state parameter"})
+
+        code_verifier, state_expires_at = claimed
+        if state_expires_at.replace(tzinfo=timezone.utc) < now:
+            raise HTTPException(status_code=400, detail={"status": "error", "message": "State parameter expired"})
 
         exchange_payload = {
             "client_id": GITHUB_CLIENT_ID,
@@ -593,22 +599,30 @@ async def refresh_tokens(request: Request, _=Depends(auth_rate_limit)):
 
     db = SessionLocal()
     try:
-        rt = (
-            db.query(RefreshToken)
-            .filter(RefreshToken.token_hash == token_hash, RefreshToken.is_revoked.is_(False))
-            .first()
-        )
-        if not rt:
+        # Atomic claim: only the request that wins the UPDATE proceeds.
+        # Two concurrent /auth/refresh calls with the same token can no longer
+        # both pass the is_revoked check and mint two valid pairs.
+        claim = db.execute(
+            text(
+                """
+                UPDATE refresh_tokens
+                   SET is_revoked = true
+                 WHERE token_hash = :h
+                   AND is_revoked = false
+             RETURNING user_id, expires_at
+                """
+            ),
+            {"h": token_hash},
+        ).first()
+        db.commit()
+        if not claim:
             raise HTTPException(status_code=401, detail={"status": "error", "message": "Invalid refresh token"})
-        if rt.expires_at.replace(tzinfo=timezone.utc) < now:
-            rt.is_revoked = True
-            db.commit()
+
+        user_id, expires_at = claim
+        if expires_at.replace(tzinfo=timezone.utc) < now:
             raise HTTPException(status_code=401, detail={"status": "error", "message": "Refresh token expired"})
 
-        rt.is_revoked = True
-        db.commit()
-
-        user = db.query(User).filter(User.id == rt.user_id).first()
+        user = db.query(User).filter(User.id == user_id).first()
         if not user or not user.is_active:
             raise HTTPException(status_code=403, detail={"status": "error", "message": "Account inactive"})
 

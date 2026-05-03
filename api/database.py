@@ -62,6 +62,10 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS ix_profiles_country_id ON profiles (country_id)",
             "CREATE INDEX IF NOT EXISTS ix_profiles_created_at ON profiles (created_at)",
             "CREATE INDEX IF NOT EXISTS ix_profiles_gender_prob ON profiles (gender_probability)",
+            # Composite covers the common combined filter
+            # (gender + age_group + country_id) used by /api/profiles and search.
+            "CREATE INDEX IF NOT EXISTS ix_profiles_gender_age_country "
+            "ON profiles (gender, age_group, country_id)",
         ]:
             try:
                 conn.execute(text(stmt))
