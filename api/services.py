@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from api.cache import cache_get, cache_set, invalidate_profile_caches
 from api.database import SessionLocal
 from api.models import Profile, row_to_dict
+from api.normalize import cache_key_for
 from api.utils import generate_uuid7, classify_age, COUNTRY_NAMES
 from api.nlp import parse_query
 
@@ -172,12 +173,18 @@ def list_profiles(
     page = max(1, page)
     limit = max(1, min(limit, 100_000))
 
-    cache_key = (
-        "profiles:list:"
-        f"{gender}:{age_group}:{country_id}:{min_age}:{max_age}:"
-        f"{min_gender_probability}:{min_country_probability}:"
-        f"{sort_by}:{order}:{page}:{limit}"
-    )
+    filters = {
+        "gender": gender,
+        "age_group": age_group,
+        "country_id": country_id,
+        "min_age": min_age,
+        "max_age": max_age,
+        "min_gender_probability": min_gender_probability,
+        "min_country_probability": min_country_probability,
+        "sort_by": sort_by,
+        "order": order if sort_by else None,
+    }
+    cache_key = cache_key_for(filters, page, limit)
     cached = cache_get(cache_key)
     if cached is not None:
         return {"status_code": 200, "body": cached}
@@ -236,7 +243,11 @@ def search_profiles(q: str, page: int = 1, limit: int = 10) -> dict:
             "body": {"status": "error", "message": "Unable to interpret query"},
         }
 
-    cache_key = f"profiles:search:{q.strip().lower()}:{page}:{limit}"
+    # Key off the parsed filter dict, not the raw query string, so that
+    # "Nigerian females 20-45" and "Women aged 20-45 in Nigeria" share
+    # one cache entry — and also collide with the equivalent direct
+    # /api/profiles call.
+    cache_key = cache_key_for(filters, page, limit)
     cached = cache_get(cache_key)
     if cached is not None:
         return {"status_code": 200, "body": cached}
