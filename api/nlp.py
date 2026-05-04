@@ -13,11 +13,16 @@ _AGE_GROUP_PATTERNS = [
 _YOUNG_RE = re.compile(r"\byoung\b")
 _MIN_AGE_RE = re.compile(r"\b(?:above|over|older than|at least|more than)\s+(\d+)")
 _MAX_AGE_RE = re.compile(r"\b(?:below|under|younger than|less than|at most)\s+(\d+)")
-_BETWEEN_RE = re.compile(r"\bbetween\s+(\d+)\s+and\s+(\d+)")
-_AGE_RANGE_RE = re.compile(r"\bages?\s+(\d+)\s+(?:to|[-–])\s+(\d+)")
+_BETWEEN_RE = re.compile(r"\bbetween\s+(?:ages?\s+)?(\d+)\s+and\s+(\d+)")
+_AGE_RANGE_RE = re.compile(r"\b(?:ages?|aged)\s+(\d+)\s*(?:to|and|[-–])\s*(\d+)")
 _COUNTRY_RE = re.compile(
-    r"\b(?:from|in)\s+([a-z][a-z\s'\-]*)(?=\s*(?:$|\b(?:above|below|over|under|between|aged?|who|that|with)))"
+    r"\b(?:from|in|living\s+in|based\s+in)\s+([a-z][a-z\s'\-]*?)(?=\s*(?:$|\b(?:above|below|over|under|between|aged?|who|that|with|and)))"
 )
+# Bare-token country scan: matches single words like "Nigerian", "British"
+# even when no "from"/"in" preposition is present. Word characters only;
+# the result is validated against COUNTRY_LOOKUP, so non-country tokens
+# silently miss.
+_TOKEN_RE = re.compile(r"\b([a-z]+(?:\s+[a-z]+)?)\b")
 
 
 def parse_query(raw: str) -> Optional[dict]:
@@ -64,11 +69,25 @@ def parse_query(raw: str) -> Optional[dict]:
             if m:
                 filters["max_age"] = int(m.group(1))
 
-    # Country
+    # Country — first try a prepositional phrase ("from X", "in X", …),
+    # then fall back to bare demonyms ("Nigerian", "British") scanned
+    # token-by-token against the lookup table.
     m = _COUNTRY_RE.search(q)
     if m:
         country_id = lookup_country_id(m.group(1).strip())
         if country_id:
             filters["country_id"] = country_id
+    if "country_id" not in filters:
+        # 2-grams first ("south korean") so "south" doesn't shadow them.
+        tokens = re.findall(r"[a-z]+", q)
+        for n in (2, 1):
+            for i in range(len(tokens) - n + 1):
+                phrase = " ".join(tokens[i:i + n])
+                cid = lookup_country_id(phrase)
+                if cid:
+                    filters["country_id"] = cid
+                    break
+            if "country_id" in filters:
+                break
 
     return filters if filters else None
