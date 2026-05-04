@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """
-Seed the database with 2026 generated profile records.
+Seed the database with generated profile records.
 Re-running this script is safe — existing names are skipped.
 
 Usage:
-    python seed.py
+    python seed.py                  # default: 2026 profiles (Stage 3 baseline)
+    python seed.py --count 1000000  # Stage 4B baseline (1M+ rows)
 """
 
+import argparse
 import os
 import random
+import sys
 import time
 from datetime import datetime, timezone, timedelta
+from typing import Iterable, Iterator
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, Column, String, Float, Integer, text
@@ -25,7 +29,9 @@ _raw_url = os.environ.get("DATABASE_URL", "sqlite:////tmp/profiles.db")
 if _raw_url.startswith("postgres://"):
     _raw_url = _raw_url.replace("postgres://", "postgresql://", 1)
 
-if _raw_url.startswith("sqlite"):
+IS_SQLITE = _raw_url.startswith("sqlite")
+
+if IS_SQLITE:
     engine = create_engine(
         _raw_url, connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
@@ -57,7 +63,7 @@ Base.metadata.create_all(bind=engine)
 # ensure country_name column exists
 with engine.connect() as conn:
     try:
-        if _raw_url.startswith("sqlite"):
+        if IS_SQLITE:
             conn.execute(text("ALTER TABLE profiles ADD COLUMN country_name VARCHAR"))
         else:
             conn.execute(text(
@@ -152,6 +158,12 @@ COUNTRIES = [
     ("AE", "United Arab Emirates", 2),
 ]
 
+COLUMNS = (
+    "id", "name", "gender", "gender_probability", "sample_size",
+    "age", "age_group", "country_id", "country_name",
+    "country_probability", "created_at",
+)
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _uuid7() -> str:
@@ -178,42 +190,26 @@ def _classify_age(age: int) -> str:
     return "senior"
 
 
-def _weighted_country() -> tuple[str, str]:
-    population = [c for (cid, cname, w) in COUNTRIES for _ in range(w)]
-    choice = random.choice(population)
-    return choice[0], choice[1]
+# Pre-expanded country population for O(1) weighted choice — built once.
+_COUNTRY_POP = [(c[0], c[1]) for c in COUNTRIES for _ in range(c[2])]
 
 
-# ─── Build profile records ────────────────────────────────────────────────────
+# ─── Name pool & generator ────────────────────────────────────────────────────
 
-TARGET = 2026
-rng = random.Random(42)  # fixed seed for reproducibility
-
-# Generate name pools: first_name + " " + last_name
-male_names: list[str] = []
-for fn in MALE_FIRST_NAMES:
-    for ln in LAST_NAMES:
-        male_names.append(f"{fn} {ln}")
-
-female_names: list[str] = []
-for fn in FEMALE_FIRST_NAMES:
-    for ln in LAST_NAMES:
-        female_names.append(f"{fn} {ln}")
-
-rng.shuffle(male_names)
-rng.shuffle(female_names)
-
-half = TARGET // 2
-male_sample = male_names[:half]           # 1013
-female_sample = female_names[:TARGET - half]  # 1013
-
-# Base timestamp spread over ~2 years before today
 _BASE_TS = datetime(2024, 1, 1, tzinfo=timezone.utc)
 _RANGE_DAYS = (datetime(2026, 4, 20, tzinfo=timezone.utc) - _BASE_TS).days
 
 
-def _make_profile(name: str, gender: str) -> dict:
-    # age distribution: child 5%, teenager 15%, adult 65%, senior 15%
+def _build_name_pools(rng: random.Random) -> tuple[list[str], list[str]]:
+    """Cartesian product of first × last, shuffled deterministically."""
+    male = [f"{fn} {ln}" for fn in MALE_FIRST_NAMES for ln in LAST_NAMES]
+    female = [f"{fn} {ln}" for fn in FEMALE_FIRST_NAMES for ln in LAST_NAMES]
+    rng.shuffle(male)
+    rng.shuffle(female)
+    return male, female
+
+
+def _gen_profile(rng: random.Random, name: str, gender: str) -> dict:
     r = rng.random()
     if r < 0.05:
         age = rng.randint(1, 12)
@@ -224,9 +220,7 @@ def _make_profile(name: str, gender: str) -> dict:
     else:
         age = rng.randint(60, 85)
 
-    cid, cname = rng.choice(
-        [(c[0], c[1]) for c in COUNTRIES for _ in range(c[2])]
-    )
+    cid, cname = rng.choice(_COUNTRY_POP)
 
     created_delta = timedelta(
         days=rng.randint(0, _RANGE_DAYS),
@@ -251,25 +245,158 @@ def _make_profile(name: str, gender: str) -> dict:
     }
 
 
-records = (
-    [_make_profile(n, "male") for n in male_sample]
-    + [_make_profile(n, "female") for n in female_sample]
-)
-rng.shuffle(records)
+def _iter_records(count: int, rng: random.Random) -> Iterator[dict]:
+    """
+    Yield `count` profile dicts.
 
-# ─── Insert ───────────────────────────────────────────────────────────────────
+    For count <= len(pool), behavior matches the original script exactly:
+    half male, half female, shuffled. For count > len(pool), the pool is
+    cycled and a numeric suffix is appended to keep names unique
+    (e.g. "emmanuel okonkwo 1").
+    """
+    male_pool, female_pool = _build_name_pools(rng)
+    half = count // 2
+    male_target = half
+    female_target = count - half
 
-db = SessionLocal()
-try:
-    existing_names: set[str] = {r[0] for r in db.query(Profile.name).all()}
-    new_records = [r for r in records if r["name"] not in existing_names]
+    def _stream(pool: list[str], target: int, gender: str) -> Iterator[dict]:
+        pool_size = len(pool)
+        for i in range(target):
+            base = pool[i % pool_size]
+            cycle = i // pool_size
+            name = base if cycle == 0 else f"{base} {cycle}"
+            yield _gen_profile(rng, name, gender)
 
-    if not new_records:
-        print(f"Database already has {len(existing_names)} profiles — nothing to insert.")
+    # Interleave to keep the original's "shuffled" feel without holding
+    # the whole list in memory. Drains males then females; for the default
+    # 2026 path we additionally shuffle to preserve byte-for-byte parity.
+    if count <= len(male_pool) + len(female_pool):
+        records = (
+            list(_stream(male_pool, male_target, "male"))
+            + list(_stream(female_pool, female_target, "female"))
+        )
+        rng.shuffle(records)
+        yield from records
     else:
-        db.bulk_insert_mappings(Profile, new_records)
-        db.commit()
-        total = db.query(Profile).count()
-        print(f"Inserted {len(new_records)} profiles. Total in DB: {total}")
-finally:
-    db.close()
+        # Large mode: stream without materializing the full list.
+        yield from _stream(male_pool, male_target, "male")
+        yield from _stream(female_pool, female_target, "female")
+
+
+def _batched(it: Iterable[dict], size: int) -> Iterator[list[dict]]:
+    batch: list[dict] = []
+    for item in it:
+        batch.append(item)
+        if len(batch) >= size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
+# ─── Insert paths ─────────────────────────────────────────────────────────────
+
+def _insert_postgres(batches: Iterable[list[dict]]) -> tuple[int, int]:
+    """Fast path: psycopg2 execute_values + ON CONFLICT DO NOTHING."""
+    from psycopg2.extras import execute_values
+
+    raw = engine.raw_connection()
+    inserted = 0
+    seen = 0
+    sql = (
+        f"INSERT INTO profiles ({', '.join(COLUMNS)}) VALUES %s "
+        "ON CONFLICT (name) DO NOTHING"
+    )
+    try:
+        with raw.cursor() as cur:
+            for batch in batches:
+                rows = [tuple(r[c] for c in COLUMNS) for r in batch]
+                execute_values(cur, sql, rows, page_size=len(rows))
+                # rowcount reflects rows actually inserted (excludes conflicts)
+                inserted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+                seen += len(batch)
+                raw.commit()
+                print(f"  …processed {seen:>8} rows (inserted so far: {inserted})", flush=True)
+    finally:
+        raw.close()
+    return inserted, seen
+
+
+def _insert_sqlite(batches: Iterable[list[dict]]) -> tuple[int, int]:
+    """Dev path: ORM bulk_insert_mappings, dedup against existing names per batch."""
+    db = SessionLocal()
+    inserted = 0
+    seen = 0
+    try:
+        existing: set[str] = {r[0] for r in db.query(Profile.name).all()}
+        for batch in batches:
+            new_rows = [r for r in batch if r["name"] not in existing]
+            if new_rows:
+                db.bulk_insert_mappings(Profile, new_rows)
+                db.commit()
+                existing.update(r["name"] for r in new_rows)
+                inserted += len(new_rows)
+            seen += len(batch)
+            print(f"  …processed {seen:>8} rows (inserted so far: {inserted})", flush=True)
+    finally:
+        db.close()
+    return inserted, seen
+
+
+# ─── Entry point ──────────────────────────────────────────────────────────────
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Seed profiles table.")
+    parser.add_argument(
+        "--count", type=int, default=2026,
+        help="Number of profiles to generate (default: 2026)",
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=5000,
+        help="Insert batch size (default: 5000)",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=42,
+        help="RNG seed for deterministic output (default: 42)",
+    )
+    args = parser.parse_args()
+
+    if args.count < 1:
+        print("--count must be >= 1", file=sys.stderr)
+        return 2
+
+    rng = random.Random(args.seed)
+    pool_total = (len(MALE_FIRST_NAMES) + len(FEMALE_FIRST_NAMES)) * len(LAST_NAMES)
+
+    print(
+        f"Seeding {args.count} profiles "
+        f"(pool size: {pool_total}, batch: {args.batch_size}, "
+        f"backend: {'sqlite' if IS_SQLITE else 'postgres'})",
+        flush=True,
+    )
+    if args.count > pool_total:
+        print(
+            f"  note: count exceeds name pool — names beyond {pool_total} "
+            "will be suffixed (e.g. 'emmanuel okonkwo 1')",
+            flush=True,
+        )
+
+    t0 = time.time()
+    batches = _batched(_iter_records(args.count, rng), args.batch_size)
+    if IS_SQLITE:
+        inserted, seen = _insert_sqlite(batches)
+    else:
+        inserted, seen = _insert_postgres(batches)
+    elapsed = time.time() - t0
+
+    skipped = seen - inserted
+    print(
+        f"Done. Generated {seen}, inserted {inserted}, "
+        f"skipped (duplicates) {skipped} in {elapsed:.1f}s.",
+        flush=True,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
