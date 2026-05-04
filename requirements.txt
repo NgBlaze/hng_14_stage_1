@@ -7,3 +7,4 @@ python-dotenv
 PyJWT
 slowapi
 redis
+python-multipart

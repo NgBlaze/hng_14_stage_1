@@ -3,7 +3,8 @@ import io
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Depends, File, Path, Query, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
 
 from api import services
@@ -55,6 +56,29 @@ async def create_profile(
         return JSONResponse(status_code=400, content={"status": "error", "message": "Missing or empty name"})
 
     result = await services.create_profile_from_name(name)
+    return JSONResponse(status_code=result["status_code"], content=result["body"])
+
+
+# ─── POST /api/profiles/upload (admin only) ──────────────────────────────────
+
+@router.post("/upload")
+async def upload_profiles(
+    request: Request,
+    file: UploadFile = File(...),
+    user=Depends(require_admin),
+    _=Depends(check_api_version),
+    __=Depends(check_csrf),
+    ___=Depends(api_rate_limit),
+):
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": "Expected a .csv file"},
+        )
+
+    # Service is sync (DB I/O + csv.DictReader); run off the event loop so
+    # other requests on this worker keep responding.
+    result = await run_in_threadpool(services.upload_profiles_csv, file.file)
     return JSONResponse(status_code=result["status_code"], content=result["body"])
 
 

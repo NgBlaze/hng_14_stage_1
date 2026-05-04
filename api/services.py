@@ -1,12 +1,15 @@
+import csv
 import httpx
+import io
 import asyncio
+import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, BinaryIO
 
 from sqlalchemy.exc import IntegrityError
 
 from api.cache import cache_get, cache_set, invalidate_profile_caches
-from api.database import SessionLocal
+from api.database import SessionLocal, engine
 from api.models import Profile, row_to_dict
 from api.normalize import cache_key_for
 from api.utils import generate_uuid7, classify_age, COUNTRY_NAMES
@@ -319,3 +322,222 @@ def delete_profile_by_id(profile_id: str) -> dict:
         return {"status_code": 204, "body": None}
     finally:
         db.close()
+
+
+# ─── CSV bulk ingestion ───────────────────────────────────────────────────────
+
+_CSV_REQUIRED = ("name", "gender", "age", "country_id")
+_CSV_OPTIONAL = (
+    "gender_probability", "sample_size", "age_group",
+    "country_name", "country_probability", "created_at",
+)
+_CSV_COLUMNS = (
+    "id", "name", "gender", "gender_probability", "sample_size",
+    "age", "age_group", "country_id", "country_name",
+    "country_probability", "created_at",
+)
+_CSV_BATCH_SIZE = 1000
+
+
+def _validate_row(raw: dict) -> tuple[Optional[dict], Optional[str]]:
+    """Return (clean_dict, None) or (None, reason). reason categorises skips."""
+    try:
+        name = (raw.get("name") or "").strip().lower()
+        if not name:
+            return None, "missing_required"
+
+        gender = (raw.get("gender") or "").strip().lower()
+        if gender not in VALID_GENDERS:
+            return None, "invalid_value"
+
+        age_str = (raw.get("age") or "").strip()
+        if not age_str:
+            return None, "missing_required"
+        age = int(age_str)
+        if age < 0 or age > 150:
+            return None, "invalid_value"
+
+        country_id = (raw.get("country_id") or "").strip().upper()
+        if len(country_id) != 2 or not country_id.isalpha():
+            return None, "invalid_value"
+
+        # Optional fields with safe defaults
+        age_group = (raw.get("age_group") or "").strip().lower() or classify_age(age)
+        if age_group not in VALID_AGE_GROUPS:
+            return None, "invalid_value"
+
+        def _opt_float(key: str, default: float) -> float:
+            v = (raw.get(key) or "").strip()
+            if not v:
+                return default
+            f = float(v)
+            if not (0.0 <= f <= 1.0):
+                raise ValueError
+            return f
+
+        gender_prob = _opt_float("gender_probability", 0.0)
+        country_prob = _opt_float("country_probability", 0.0)
+
+        sample_str = (raw.get("sample_size") or "").strip()
+        sample_size = int(sample_str) if sample_str else 0
+        if sample_size < 0:
+            return None, "invalid_value"
+
+        country_name = (raw.get("country_name") or "").strip() or COUNTRY_NAMES.get(country_id)
+        created_at = (raw.get("created_at") or "").strip() or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        return {
+            "id": generate_uuid7(),
+            "name": name,
+            "gender": gender,
+            "gender_probability": gender_prob,
+            "sample_size": sample_size,
+            "age": age,
+            "age_group": age_group,
+            "country_id": country_id,
+            "country_name": country_name,
+            "country_probability": country_prob,
+            "created_at": created_at,
+        }, None
+    except (ValueError, TypeError):
+        return None, "invalid_value"
+
+
+def _flush_batch_postgres(cur, batch: list[dict]) -> int:
+    """Insert batch via execute_values + ON CONFLICT. Returns rows actually inserted."""
+    from psycopg2.extras import execute_values
+    sql = (
+        f"INSERT INTO profiles ({', '.join(_CSV_COLUMNS)}) VALUES %s "
+        "ON CONFLICT (name) DO NOTHING"
+    )
+    rows = [tuple(r[c] for c in _CSV_COLUMNS) for r in batch]
+    execute_values(cur, sql, rows, page_size=len(rows))
+    return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+
+def _flush_batch_sqlite(db, batch: list[dict]) -> int:
+    """Dev path: dedupe against existing names then bulk insert."""
+    names = [r["name"] for r in batch]
+    existing = {
+        n for (n,) in db.query(Profile.name).filter(Profile.name.in_(names)).all()
+    }
+    new_rows = [r for r in batch if r["name"] not in existing]
+    if new_rows:
+        db.bulk_insert_mappings(Profile, new_rows)
+        db.commit()
+    return len(new_rows)
+
+
+def upload_profiles_csv(file_stream: BinaryIO) -> dict:
+    """
+    Stream-parse a CSV upload, batch-insert valid rows, return a summary.
+
+    The whole file is never held in memory: csv.DictReader pulls one logical
+    record at a time from the underlying SpooledTemporaryFile, and rows are
+    flushed every _CSV_BATCH_SIZE. Batches commit independently so a partial
+    failure mid-stream still keeps the rows already inserted.
+    """
+    counters = {
+        "received": 0,
+        "inserted": 0,
+        "skipped_missing_required": 0,
+        "skipped_invalid_value": 0,
+        "skipped_duplicate_in_batch": 0,
+        "skipped_duplicate_in_db": 0,
+        "skipped_malformed": 0,
+    }
+    t0 = time.time()
+
+    # Decode bytes → text, replace bad UTF-8 (counts as malformed via row check)
+    try:
+        text_stream = io.TextIOWrapper(file_stream, encoding="utf-8", errors="replace", newline="")
+        reader = csv.DictReader(text_stream)
+    except Exception:
+        return {
+            "status_code": 400,
+            "body": {"status": "error", "message": "Could not parse CSV"},
+        }
+
+    if not reader.fieldnames:
+        return {
+            "status_code": 400,
+            "body": {"status": "error", "message": "Empty CSV (no header)"},
+        }
+    headers = {h.strip().lower() for h in reader.fieldnames}
+    missing = [c for c in _CSV_REQUIRED if c not in headers]
+    if missing:
+        return {
+            "status_code": 400,
+            "body": {
+                "status": "error",
+                "message": f"CSV missing required columns: {missing}",
+            },
+        }
+
+    is_postgres = engine.dialect.name != "sqlite"
+    raw_conn = engine.raw_connection() if is_postgres else None
+    db = SessionLocal() if not is_postgres else None
+    cur = raw_conn.cursor() if is_postgres else None
+
+    batch: list[dict] = []
+    seen_in_batch: set[str] = set()
+
+    def _flush() -> None:
+        if not batch:
+            return
+        if is_postgres:
+            inserted = _flush_batch_postgres(cur, batch)
+            raw_conn.commit()
+        else:
+            inserted = _flush_batch_sqlite(db, batch)
+        counters["inserted"] += inserted
+        # Anything not inserted that was sent to the DB is a duplicate-in-DB
+        counters["skipped_duplicate_in_db"] += len(batch) - inserted
+        batch.clear()
+        seen_in_batch.clear()
+
+    try:
+        for raw in reader:
+            counters["received"] += 1
+            # csv.DictReader sets None for short rows and puts excess columns
+            # under a `None` key. Treat both as malformed.
+            if None in raw.values() or None in raw.keys():
+                counters["skipped_malformed"] += 1
+                continue
+
+            clean, reason = _validate_row(raw)
+            if clean is None:
+                if reason == "missing_required":
+                    counters["skipped_missing_required"] += 1
+                else:
+                    counters["skipped_invalid_value"] += 1
+                continue
+
+            if clean["name"] in seen_in_batch:
+                counters["skipped_duplicate_in_batch"] += 1
+                continue
+            seen_in_batch.add(clean["name"])
+            batch.append(clean)
+
+            if len(batch) >= _CSV_BATCH_SIZE:
+                _flush()
+        _flush()
+    finally:
+        if cur is not None:
+            cur.close()
+        if raw_conn is not None:
+            raw_conn.close()
+        if db is not None:
+            db.close()
+
+    if counters["inserted"]:
+        invalidate_profile_caches()
+
+    return {
+        "status_code": 200,
+        "body": {
+            "status": "success",
+            "summary": counters,
+            "elapsed_seconds": round(time.time() - t0, 2),
+        },
+    }
